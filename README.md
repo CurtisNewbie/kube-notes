@@ -254,17 +254,18 @@ With this open, we can access the service using the url returned. Without the `-
 
 ```sh
 minikube service hello-minikube
-|-----------|----------------|-------------|---------------------------|
-| NAMESPACE |      NAME      | TARGET PORT |            URL            |
-|-----------|----------------|-------------|---------------------------|
-| default   | hello-minikube |        8080 | http://192.168.49.2:30856 |
-|-----------|----------------|-------------|---------------------------|
-🏃  Starting tunnel for service hello-minikube.
-|-----------|----------------|-------------|------------------------|
-| NAMESPACE |      NAME      | TARGET PORT |          URL           |
-|-----------|----------------|-------------|------------------------|
-| default   | hello-minikube |             | http://127.0.0.1:61342 |
-|-----------|----------------|-------------|------------------------|
+
+# |-----------|----------------|-------------|---------------------------|
+# | NAMESPACE |      NAME      | TARGET PORT |            URL            |
+# |-----------|----------------|-------------|---------------------------|
+# | default   | hello-minikube |        8080 | http://192.168.49.2:30856 |
+# |-----------|----------------|-------------|---------------------------|
+# 🏃  Starting tunnel for service hello-minikube.
+# |-----------|----------------|-------------|------------------------|
+# | NAMESPACE |      NAME      | TARGET PORT |          URL           |
+# |-----------|----------------|-------------|------------------------|
+# | default   | hello-minikube |             | http://127.0.0.1:61342 |
+# |-----------|----------------|-------------|------------------------|
 ```
 
 These two commands open the tunnel for the service (it seems like it's a Drawin/Windows/WSL thing, and it's not needed on Linux. On Linux, no tunnel is created).
@@ -309,9 +310,10 @@ Then we get service to check the ip and port assigned for this service.
 
 ```sh
 kubectl get service
-NAME              TYPE           CLUSTER-IP     EXTERNAL-IP   PORT(S)          AGE
-hello-minikube1   LoadBalancer   10.97.163.13   <pending>     8080:31170/TCP   11s
-kubernetes        ClusterIP      10.96.0.1      <none>        443/TCP          4h43m
+
+# NAME              TYPE           CLUSTER-IP     EXTERNAL-IP   PORT(S)          AGE
+# hello-minikube1   LoadBalancer   10.97.163.13   <pending>     8080:31170/TCP   11s
+# kubernetes        ClusterIP      10.96.0.1      <none>        443/TCP          4h43m
 ```
 
 Since we are running Minikube on Darwin (Mac OS), we always need to open a tunnel in order to connect to our exposed services.
@@ -379,10 +381,10 @@ docker build . -t empty-head:latest
 We can list the images using:
 
 ```sh
-# docker images
+docker images
 
-REPOSITORY       TAG       IMAGE ID       CREATED          SIZE
-empty-head       latest    9770f9061f21   59 minutes ago   27.1MB
+# REPOSITORY       TAG       IMAGE ID       CREATED          SIZE
+# empty-head       latest    9770f9061f21   59 minutes ago   27.1MB
 ```
 
 Verify the image actually runs:
