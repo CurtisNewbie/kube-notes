@@ -2,6 +2,13 @@
 
 Notes for kubernetes
 
+- Minikube Tutorial: https://minikube.sigs.k8s.io/docs/start/
+- Kubernetes Doc: 
+- Kubectl Cheat Sheet: https://kubernetes.io/docs/reference/kubectl/cheatsheet/#bash
+- Nginx Ingress Controller: https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/ 
+- Ingress nginx for TCP and UDP services (Minikube): https://minikube.sigs.k8s.io/docs/tutorials/nginx_tcp_udp_ingress/
+
+
 ## Getting Started
 
 ### 1. Install Minikube 
@@ -329,35 +336,199 @@ kubectl get service
 
 With this setup, we can access `hello-minikube1` through `http://127.0.0.1:8080`.
 
+## Pushing Images To Minikube And Deploy Them
+
+Say we have a Golang app with the following Dockerfile.
+
+```dockerfile
+FROM golang:1.18-alpine3.17 as build
+LABEL author="Yongjie.Zhuang"
+
+WORKDIR /go/src/build/
+
+# for golang env
+RUN go env -w GO111MODULE=on
+RUN go env -w GOPROXY=https://mirrors.aliyun.com/goproxy/,direct
+
+# dependencies
+COPY go.mod .
+COPY go.sum .
+
+RUN go mod download
+
+# build executable
+COPY . .
+RUN go build -o main
 
 
+FROM alpine:3.17
+WORKDIR /usr/src/
+COPY --from=build /go/src/build/main ./main
+COPY --from=build /go/src/build/app-conf-dev.yml ./app-conf-dev.yml
+EXPOSE 8080
 
+CMD ["./main"]
+```
 
+Then we build it with following command:
 
+```sh
+docker build . -t empty-head:latest
+```
 
+We can list the images using:
 
+```sh
+# docker images
 
+REPOSITORY       TAG       IMAGE ID       CREATED          SIZE
+empty-head       latest    9770f9061f21   59 minutes ago   27.1MB
+```
 
+Verify the image actually runs:
 
+```sh
+docker run -p 8080:8080 9770f9061f21
+```
 
+Then we push the image to Minikube:
 
+- About pushing images to minikube: https://minikube.sigs.k8s.io/docs/handbook/pushing/
 
+```sh
+minikube image load empty-head:latest
+```
 
+We can check that the image is actually inside Minikube, which is the "docker.io/library/empty-head:latest"
 
+```sh
+minikube image list
 
+# registry.k8s.io/pause:3.9
+# registry.k8s.io/kube-scheduler:v1.26.3
+# registry.k8s.io/kube-proxy:v1.26.3
+# registry.k8s.io/kube-controller-manager:v1.26.3
+# registry.k8s.io/kube-apiserver:v1.26.3
+# registry.k8s.io/ingress-nginx/kube-webhook-certgen:<none>
+# registry.k8s.io/ingress-nginx/controller:<none>
+# registry.k8s.io/etcd:3.5.6-0
+# registry.k8s.io/e2e-test-images/agnhost:2.39
+# registry.k8s.io/coredns/coredns:v1.9.3
+# gcr.io/k8s-minikube/storage-provisioner:v5
+# gcr.io/k8s-minikube/minikube-ingress-dns:<none>
+# docker.io/library/empty-head:latest
+# docker.io/kubernetesui/metrics-scraper:<none>
+# docker.io/kubernetesui/dashboard:<none>
+# docker.io/kicbase/echo-server:1.0
+```
 
+Get the deployment file for our deployment: 
 
+```sh
+kubectl create deployment empty-head --image=docker.io/library/empty-head:latest -o yaml --dry-run=client > empty-head.yaml
+```
 
+which has the following content:
 
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: empty-head
+  name: empty-head
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: empty-head
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: empty-head
+    spec:
+      containers:
+      - image: docker.io/library/empty-head:latest
+        name: empty-head
+        resources: {}
+status: {}
+```
 
+Then we add the imagePullPolicy, setting it to Never, so that it will actually use our cached docker image.
 
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: empty-head
+  name: empty-head
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: empty-head
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: empty-head
+    spec:
+      containers:
+      - image: docker.io/library/empty-head:latest
+        name: empty-head
+        resources: {}
+        imagePullPolicy: Never # CHANGED HERE!!!
+status: {}
+```
 
+Lets create a deployment for it.
 
+```sh
+kubectl create -f empty-head.yaml
 
+# deployment.apps/empty-head created
+```
 
+Once we have deployment created, we expose it as service.
 
+```sh 
+kubectl expose deployment empty-head --type=NodePort --port=8080
+```
 
+This app handles "https://0.0.0.0:8080/ping" endpoint. So we can do the following to request it:
 
+```sh
+kubectl expose deployment empty-head --type=NodePort --port=8080
+# service/empty-head exposed
+
+kubectl get service
+# NAME         TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)          AGE
+# empty-head   NodePort    10.100.248.90   <none>        8080:32685/TCP   5s
+# kubernetes   ClusterIP   10.96.0.1       <none>        443/TCP          8h
+# photon@Yongjie ~$ mk service empty-head
+# |-----------|------------|-------------|---------------------------|
+# | NAMESPACE |    NAME    | TARGET PORT |            URL            |
+# |-----------|------------|-------------|---------------------------|
+# | default   | empty-head |        8080 | http://192.168.49.2:32685 |
+# |-----------|------------|-------------|---------------------------|
+# 🏃  Starting tunnel for service empty-head.
+# |-----------|------------|-------------|------------------------|
+# | NAMESPACE |    NAME    | TARGET PORT |          URL           |
+# |-----------|------------|-------------|------------------------|
+# | default   | empty-head |             | http://127.0.0.1:53441 |
+# |-----------|------------|-------------|------------------------|
+# 🎉  Opening service default/empty-head in default browser...
+# ❗  Because you are using a Docker driver on darwin, the terminal needs to be open to run it.
+
+curl http://127.0.0.1:53441/ping
+# pong at 2023-04-27 11:29:39.135640338 +0000 UTC m=+240.537862673
+```
 
 
 
