@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: empty-mind
+  name: empty-mind
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: empty-mind
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: empty-mind
+    spec:
+      containers:
+      - image: docker.io/library/empty-mind:latest
+        name: empty-mind
+        resources: {}
+        imagePullPolicy: Never
+
+status: {}

@@ -1,0 +1,15 @@
+#!/bin/bash
+
+docker build . -t empty-mind:latest
+
+kubectl delete deployment empty-mind
+
+sleep 3
+
+minikube image rm docker.io/library/empty-mind:latest
+
+minikube image load empty-mind:latest
+
+kubectl apply -f deployment.yaml
+
+kubectl apply -f service.yaml

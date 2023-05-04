@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: empty-head
+  name: empty-head
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: empty-head
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: empty-head
+    spec:
+      containers:
+      - image: docker.io/library/empty-head:latest
+        name: empty-head
+        resources: {}
+        imagePullPolicy: Never
+status: {}

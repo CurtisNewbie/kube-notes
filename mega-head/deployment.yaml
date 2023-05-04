@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: mega-head
+  name: mega-head
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mega-head
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: mega-head
+    spec:
+      containers:
+      - image: docker.io/library/mega-head:latest
+        name: mega-head
+        resources: {}
+        imagePullPolicy: Never
+status: {}

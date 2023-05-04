@@ -1,0 +1,13 @@
+#!/bin/bash
+
+docker build . -t mega-head:latest
+
+kubectl delete deployment mega-head
+
+sleep 3
+
+minikube image rm docker.io/library/mega-head:latest
+
+minikube image load mega-head:latest
+
+kubectl apply -f deployment.yaml
