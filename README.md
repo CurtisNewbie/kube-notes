@@ -3,15 +3,15 @@
 Notes for kubernetes
 
 - Minikube Tutorial: https://minikube.sigs.k8s.io/docs/start/
-- Kubernetes Doc: 
+- Kubernetes Doc:
 - Kubectl Cheat Sheet: https://kubernetes.io/docs/reference/kubectl/cheatsheet/#bash
-- Nginx Ingress Controller: https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/ 
+- Nginx Ingress Controller: https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/
 - Ingress nginx for TCP and UDP services (Minikube): https://minikube.sigs.k8s.io/docs/tutorials/nginx_tcp_udp_ingress/
 
 
 ## Getting Started
 
-### 1. Install Minikube 
+### 1. Install Minikube
 
 - Minikube Getting Started https://minikube.sigs.k8s.io/docs/start/
 
@@ -23,15 +23,15 @@ brew install minikube
 
 Or download it directly :D
 
-Minikube needs a driver, say, Docker. But, Dockerd is not available on MacOS, it only ships with a cli tool: the docker and docker-compose. We either install Docker Desktop or Colima. 
+Minikube needs a driver, say, Docker. But, Dockerd is not available on MacOS, it only ships with a cli tool: the docker and docker-compose. We either install Docker Desktop or Colima.
 
 - Colima Github https://github.com/abiosoft/colima
 
 ```sh
-# install colima using homebrew 
+# install colima using homebrew
 # if you are using a very old OS version, and there is no bottle for it, it may compile and it's extremely slow (at least for me)
-brew install docker-compose 
-brew install docker 
+brew install docker-compose
+brew install docker
 brew install colima
 
 # or you may download and install it directly
@@ -76,7 +76,7 @@ http://127.0.0.1:55901/api/v1/namespaces/kubernetes-dashboard/services/http:kube
 
 This command also serves as a proxy for us to access, by default the kubernetes network is not accessible externally. We can kill it by ctrl-c.
 
-### 3. The Basic 
+### 3. The Basic
 
 In k8s, Pod is a group of one or more containers. K8s deployment monitors and controls the pod, and restart the containers in pod if necessary. The concept is very similar to the docker-compose and the docker world, but with a larger scale. Deployment is also reponsible for scaling pods.
 
@@ -123,7 +123,7 @@ kubectl get pods -A
 # kubernetes-dashboard   kubernetes-dashboard-55c4cbbc7c-hptc9       1/1     Running            0             37m
 ```
 
-If you have followed the outdated tutorial, the pod may not start. For example, the `https://kubernetes.io/docs/tutorials/hello-minikube/` one. 
+If you have followed the outdated tutorial, the pod may not start. For example, the `https://kubernetes.io/docs/tutorials/hello-minikube/` one.
 
 But the experience is useful tho, the *ImagePullBackOff* error seemed to be a problem with pulling images from registry.
 Another similar error that I found is "ErrImagePull". This can also be found on the Dashboard.
@@ -231,14 +231,14 @@ Delete all minikube clusters:
 minikube delete --all
 ```
 
-## More Stuff
+### More Stuff
 
 To access applications inside Kubernetes, we use services. There are two major cagegories:
 
 - NodePort
 - LoadBalancer
 
-### NodePort
+#### NodePort
 
 NodePort is very straightforward, it opens a specific port, and the traffic sent to this port is forwarded to the service.
 
@@ -280,7 +280,7 @@ kubectl create deployment hello-minikube1 --image=kicbase/echo-server:1.0
 kubectl expose deployment hello-minikube1 --type=NodePort --port=8080
 ```
 
-Using kubectl, we can check the service port binding. 
+Using kubectl, we can check the service port binding.
 
 ```sh
 kubectl get service hello-minikube
@@ -289,7 +289,7 @@ kubectl get service hello-minikube
 # hello-minikube   NodePort   10.97.53.50   <none>        8080:30856/TCP   167m
 ```
 
-### LoadBalancer
+#### LoadBalancer
 
 According to documentation: *"A LoadBalancer service is the standard way to expose a service to the internet. With this method, each service gets its own IP address."*
 
@@ -424,7 +424,7 @@ minikube image list
 # docker.io/kicbase/echo-server:1.0
 ```
 
-Get the deployment file for our deployment: 
+Get the deployment file for our deployment:
 
 ```sh
 kubectl create deployment empty-head --image=docker.io/library/empty-head:latest -o yaml --dry-run=client > empty-head.yaml
@@ -499,7 +499,7 @@ kubectl create -f empty-head.yaml
 
 Once we have deployment created, we expose it as service.
 
-```sh 
+```sh
 kubectl expose deployment empty-head --type=NodePort --port=8080
 ```
 
@@ -532,5 +532,203 @@ curl http://127.0.0.1:53441/ping
 # pong at 2023-04-27 11:29:39.135640338 +0000 UTC m=+240.537862673
 ```
 
+## Concepts - Overview
 
+### Kubernetes Objects
+
+- src: https://kubernetes.io/docs/concepts/overview/working-with-objects/kubernetes-objects/
+
+Kubernetes objects are decribed as *"... a record of intent"*. These objects describe:
+
+- what containerized applications are running (on which nodes)
+- resources avaliable to them
+- policies around how they behave
+
+Kubernetes objects are created, modified and deleted using **Kubernetes API**, and `Kubectl` use the API as well.
+
+Almost every kubernetes objects have to nested object fields:
+
+- spec: describe its desired state
+- status: describe its current status, and is updated by kubernetes
+
+**Object Spec** is especially important for object creation.
+
+We write **".yaml"** file to describe a kubernetes object, `Kubectl` converts the deployment file to a `json` payload and make necessary API call to Kubernetes.
+
+Example of kubenetes deployment file:
+
+```yaml
+# deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  replicas: 2 # maintain 2 pods
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
+```
+
+Then we use kubectl to create the kubenetes object:
+
+```sh
+# we can also use 'kubectl create -f deployment.yaml' (they are different kind of cmds tho)
+kubectl apply -f deployment.yaml
+```
+
+In the **deploymnet file**, the following fields are required:
+
+- **apiVersion**: the kubernetes API version we will be using (e.g., for `kubectl`)
+- **kind**: kind of object
+- **metadata**: metadata needed to uniquely identify the object, e.g., `name`, `UID`, `namespace`
+- **spec**: the desired state for the object
+
+The documentation of these fields can be found in [Kubernetes API](https://kubernetes.io/docs/reference/kubernetes-api/). For deployment, it's in [Workload Resources - Deployment](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/deployment-v1/).
+
+### Object Name and UID
+
+Each kubernetes object is uniquely identified by `Name` and `UID`. `UID` is generated by Kubernetes, it's essentially UUID.
+
+`Name` is specified by deployment file in `'metadata.name'`. It must be unique for that type of the resource. ***"API resources are distinguished by their API group, resource type, namespace, and name."***
+
+### Labels and Selectors
+
+Labels add additional key/value attributes to Kubernetes objects, each key must be unique for the object. These are specified under `'metadata.labels'`.
+
+For example, the below Pod resource contains two labels.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: label-demo
+  labels:
+    environment: production
+    app: nginx
+```
+
+Labels without a prefix is private to the users. Prefix is a valid DNS subdomain names, and these shared prefix ensure that the custom label are not interfered with others. E.g.,
+
+```yaml
+metadata:
+  labels:
+    app.kubernetes.io/name: myapp
+```
+
+
+### Label Selctors
+
+With Label Selector, we can identify a set of objects through labesl. Kubernetes supports two types of selectors:
+
+- Equality-based selector (i.e., `==`, `!=`, we can also use `=`, it's the same as `==`)
+- Set-based selector (i.e., `in`, `notin`)
+
+When specifying multiple requirements, we can use comma as delimiter, and comma separator acts as **logical and operator**. E.g., `environment!=prod,tier!=frontend`, is interprted as label 'environment' not equals to 'prod' and label 'tier' not equals to 'frontend'. Selectors are `spec`s.
+
+For example,
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: cuda-test
+spec:
+  containers:
+    - name: cuda-test
+      image: "registry.k8s.io/cuda-vector-add:v0.1"
+      resources:
+        limits:
+          nvidia.com/gpu: 1
+  nodeSelector:
+    accelerator: nvidia-tesla-p100
+```
+
+This Pod selects nodes that match `'accelerator=nvidia-tesla-p100'`, and it's equivalent to `'accelerator in (nvidia-tesla-p100)'`.
+
+Set-based selector can only be used for newer resources (e.g., Job, Deployment, ReplicaSet, and DaemonSet) as follows:
+
+```yaml
+selector:
+  matchLabels:
+    component: redis
+  matchExpressions:
+    - { key: tier, operator: In, values: [cache] }
+    - { key: environment, operator: NotIn, values: [dev] }
+```
+
+We can also use `kubectl`. For example, we add labels to pod: 'env: prod', then we query them as follows:
+
+```sh
+kubectl get pods -l 'env in (prod, develop)'
+```
+
+### Annotations
+
+**Annotations** are non-identifying metadata. Same as labels, they are key/value map specified in `'metadata.annotations'`, the keys and values must both be string. E.g., inside the Pod, we may use the API to retrieve the annotations for various reasons, and Kubernetes doesn't really care about this.
+
+E.g.,
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: annotations-demo
+  annotations:
+    imageregistry: "https://hub.docker.com/"
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.14.2
+    ports:
+    - containerPort: 80
+```
+
+### Field Selectors
+
+*"Field selectors let you select Kubernetes resources based on the value of one or more resource fields."* It's more like tool or command that we may need while using `kubectl`.
+
+e.g.,
+
+```sh
+kubectl get pods --field-selector status.phase=Running
+```
+
+### Finalizers
+
+- https://kubernetes.io/docs/concepts/overview/working-with-objects/finalizers/
+
+*"Finalizers are namespaced keys that tell Kubernetes to wait until specific conditions are met before it fully deletes resources marked for deletion. Finalizers alert controllers to clean up resources the deleted object owned."*
+
+### Owners and Dependents
+
+- https://kubernetes.io/docs/concepts/overview/working-with-objects/owners-dependents/
+
+*"In Kubernetes, some objects are owners of other objects. For example, a ReplicaSet is the owner of a set of Pods. These owned objects are dependents of their owner."*
+
+### Recommanded/Common Labels
+
+- https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
+
+## Concepts - Cluster Architecture
+
+### Kubernetes Service
+
+TODO:
+
+- ClusterIp: https://medium.com/the-programmer/working-with-clusterip-service-type-in-kubernetes-45f2c01a89c8
+- Sysdig Kubernetes Service: https://sysdig.com/blog/kubernetes-services-clusterip-nodeport-loadbalancer/
+- Connect Applications Service: https://kubernetes.io/docs/tutorials/services/connect-applications-service/
+- kuby by example - Networking in Kubernetes: https://kubebyexample.com/learning-paths/application-development-kubernetes/lesson-3-networking-kubernetes/exposing
+- DNS Debugging Resolution: https://kubernetes.io/docs/tasks/administer-cluster/dns-debugging-resolution/
 
