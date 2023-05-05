@@ -2,6 +2,8 @@
 
 Notes for kubernetes
 
+- Goffinet.org About Containers and Kubernetes: https://containers.goffinet.org/containers/001-intro.html#introduction
+- Minikube vs Kind vs k3s: https://shipit.dev/posts/minikube-vs-kind-vs-k3s.html
 - Minikube Tutorial: https://minikube.sigs.k8s.io/docs/start/
 - Kubernetes Doc:
 - Kubectl Cheat Sheet: https://kubernetes.io/docs/reference/kubectl/cheatsheet/#bash
@@ -722,7 +724,335 @@ kubectl get pods --field-selector status.phase=Running
 
 ## Concepts - Cluster Architecture
 
-### Kubernetes Service
+### About Nodes
+
+Containers are placed in Pods, and Pods are ran on Nods. Nodes can be virtual/phsical machines. There are two ways create Nodes:
+
+- The `kubelet` on a node self-registers to the control plane **(the preferred and default way to do it)**
+- User manually add a Node object
+
+To view a node' status:
+
+```sh
+# list all nodes available
+kubectl get nodes
+# NAME       STATUS   ROLES           AGE     VERSION
+# minikube   Ready    control-plane   7d23h   v1.26.3
+
+# view status of node 'minikube'
+kubectl describe node/minikube
+# ... lots of output about the node :D
+```
+
+The Node Status (output of `describe` command) basically contains the following content:
+
+- **Name** (that uniquely identify the node)
+- **Roles**
+- **Labels** & **Annotations** (just like other resouces)
+- **Taints** (created when problems occurred on Nodes, e.g., *'NoSchedule'*, the taints will affect Pod Scheduling. It's also related to **Toleration**)
+- **Unschedulable** (bool, mainly used for manual administration, where we may want to mark one node being 'unschedulable')
+- **Lease** (updated by kubelet as a form of **Hearbeat**)
+- **Conditions**
+  - Describe the status of all running nodes
+    - **Ready**: Is the node healthy and schedulable?
+    - **DiskPressure**: Is disk capacity low?
+    - **MemoryPressure**: Is node memory low?
+    - **PIDPressure**: Is there too many processes?
+    - **NetworkUnavailable**: Is network not correctly configured?
+- **Addresses**
+  - Hostname
+  - Internal IP
+  - External Ip
+- **Capacity & Allocatable**
+  - Describe resources available
+    - cpu
+    - storage
+    - memory
+    - max number of pods that be scheduled
+- **System Info**
+  - Describe Hardware, OS, Kernel, Container Runtime, etc.
+
+**Node Controller**, is a control plane component, and is reponsible for:
+
+- **Assign CIDR (Classless Inter-Domain Routing) block to node.**
+  - It's essentially *"a collection of IP addresses that share the same network prefix and number of bits"*. In simple terms, the CIDR is based on a Variable-Length Subnet Masking (VLSM), which prevents the exhaustion of IP addresses.
+- **Maintain list of nodes available**
+- **Monitoring Node's Health**
+  - If node's is unhealthy, the Node Controller updates the Node's `Ready` condition under `status` to `'Unknown'`. If the node remains unreachable, the node is *evicted* by the controller.
+
+### Communications between Nodes and Control Plane
+
+#### Node to Control Plane
+
+All communications to Control Plane terminates at the API Server in Control Plane (`kube-apiserver`), some sort of authentication mechanism should be enabled.
+
+Nodes should be provisioned with a public root certificate, with which the `kubelet` use to communicate with control plane securely. See [Kubelet TLS Bootstrapping-Client Certificate Automated Provisioning](https://kubernetes.io/docs/reference/access-authn-authz/kubelet-tls-bootstrapping/)
+
+Default Service Account the Pods have doesn't have the authority to use the Kubernetes API, we need to use RBAC to create another service account for the API call (e.g, using Kubernetes Client SDK), in the RBAC resource file, the access to certain groups of API is explicitly specified.
+
+#### Control Plane to Node
+
+There two primary communications paths from Control Plane to Node:
+
+- `kube-apiserver` -> `kubelet` on each node
+  - By default connects to `kubelet` endpoint using HTTPS protocol,
+    but the TLS certificate is not verified.
+  - By using `--kubelet-certificate-authority`, `kube-apiserver` will verify connection
+    using the provided root certificate.
+  - Can also use SSH Tunnels, but it's being deprecated already.
+- `kube-apiserver` -> `proxy` -> node, pod, service directly
+  - By default use plain HTTP connections, unsafe.
+  - Even though the TLS certificate is deployed, it's not verified by `kube-apiserver`,
+    thus it's still not really safe to run in public networks.
+
+
+### Controllers
+
+In kubernetes, Controllers are like control loops, which try to maintain the desired states by making a serials of adjustments.
+
+A controller tracks at least one kubernetes resource, the resource object specifies the desired state in **object `spec` field**, the controller then is responsible for maintaining that state as close as possible.
+
+Most Controllers take actions by sending messages to API Server. For example, a Job Controller will schedule a specific task at the right time by running right number of Pods somewhere in the cluster by calling the API Server.
+
+There are some exceptions, where the Controller retrieves information from the API server, and contacts the external resources outside of the cluster to get closer to the desired state. E.g, a Controller for Nodes, may request the Cloud Service Provider to increase number of Nodes available, and report the changes back to the API Server.
+
+Controllers should be simple, and by design they may fail as well. Controllers only manage the resources they care about, e.g., using `matchLabels`, if the lebels of a Pod change, the Controller may no longer manages the Pod.
+
+### Leases
+
+Lease is an Object used to provide and support lock mechainsm, coordination activity, leader election, and heartbeats.
+
+- [Kubernetes Api - Lease V1](https://kubernetes.io/docs/reference/kubernetes-api/cluster-resources/lease-v1/)
+- [Leader Election Using Lease in Kubernetes](https://itnext.io/leader-election-in-kubernetes-using-client-go-a19cbe7a9a85)
+
+- Node Heartbeats
+  - Every kubelet hearbeat, is essentially a request to the Node's `Lease` Object,
+    that updates the `'spec.renewTime'` timestamp, the availability of the Node is thus determined by this timestamp.
+- Leader Election
+  - A Lease sepcifies the identity of holder (`holderIdentiy`) and a version number (`resourceVersion`) on it,
+    only the Leader updates the lease, and if it fails to renew the lease in time, the lease is lost, the `resourceVersion` is outdated, the update fails. ***(TODO: Not really sure how it works, the idea should be correct :D )***
+- Api Server Identity
+  - Since v1.26, k8s use the Lease API to publish identiies of `kube-apiserver`. The baisc idea is to use the lease name as selector to find all the replicas of the apiserver.
+
+### Garbage Collection
+
+- https://kubernetes.io/docs/concepts/architecture/garbage-collection/
+
+Kubernetes supports garbage collection for various types of cluster resources, e.g., terminated pods, completed jobs, unused containers and images.
+
+TODO: This section isn't important for now, finish it later.
+
+## Containers
+
+### Images
+
+Image Pull Policy
+
+- **IfNotPresent**: Pulled only when it's not present.
+- **Always**: Always contact image registry to resolve the image digest. However, if the image is locally cached already, the cached one will still be used (e.g., by matching digets). ***So, don't ever use latest tag***
+- **Never**: Never try to fetch images.
+
+### Container Lifecycle Hooks
+
+There are two hooks exposed to Containers:
+
+- `PostStart`: invoked immediately after a container is created, it may or may not be triggered before the ENTRYPOINT, there is no guarantee.
+- `PreStop`: invoked immediately before a container is terminated, it's executed before the TERM signal sent to the container.
+  When this is triggered, the pod remains hung until `terminationGracePeriodSeconds` exceeded; if it's exceeded, the pod is killed.
+
+***If either a PostStart or PreStop hook fails, it kills the Container.*** So these must be as lightweight and simple as possible. ***Hooks are delivered at least once, so they may be triggered multiple times***
+
+There are two types of hook handlers:
+
+- `Exec`: Execute a specific command
+- `HTTP`: Send a HTTP request
+
+e.g.,
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lifecycle-demo
+spec:
+  containers:
+  - name: lifecycle-demo-container
+    image: nginx
+    lifecycle:
+      postStart:
+        exec:
+          command: ["/bin/sh", "-c", "echo Hello from the postStart handler > /usr/share/message"]
+      preStop:
+        exec:
+          command: ["/bin/sh","-c","nginx -s quit; while killall -0 nginx; do sleep 1; done"]
+```
+
+## Workloads
+
+Workload resources are used to dynamically manage workloads, e.g., without the need of managing Pods manually.
+
+- **Deployment** and **ReplicaSet** (Note: ReplicaSet is a replacement of ReplicationController)
+- **StatefulSet** (for tracking state, e.g., using persistent storage that can be shared with other Pods)
+- **DaemonSet** (for pods that provide node-local facilities, e.g., some tools on spcific set of Nodes)
+- **Job** and **CronJob** (Job is one-off, CronJob is recurrent)
+
+### Pods
+
+Pods is a group of containers with shared storage and network resources.
+
+Example of Pod resource.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+spec:
+  containers:
+  - name: nginx
+    image: nginx:1.14.2
+    ports:
+    - containerPort: 80
+```
+
+Controllers for workload resources create pods from **Pod Template**. The Pod Template are specifications on how the Pods should be created, and are included in workload resources such as Deployment, Jobs and DaemonSets.
+
+Example of Pod Template:
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: hello
+spec:
+  template:
+    # This is the pod template
+    spec:
+      containers:
+      - name: hello
+        image: busybox:1.28
+        command: ['sh', '-c', 'echo "Hello, Kubernetes!" && sleep 3600']
+      restartPolicy: OnFailure
+    # The pod template ends here
+```
+
+***Modifying the Pod Template doesn't affect the Pods that are running. When the Pod Template is modified, the controller starts creating new Pods using the latest Pod Template, the Pods are eventually replaced with the new ones. The update strategy can be changed.***
+
+Since Pod shares network resources, containers in each Pod shares IP address, hostname and so on. The containers in the same Pod can request each other using localhost as well.
+
+**Static Pods** are managed directly by the `kubelet` without API server monitoring. The kubelet directly supervise them.
+
+### Pod Lifecycle
+
+A Pod has the following status:
+
+- `Pending`: Pod is accepted by Kube, it may be being scheduled, it's not running yet.
+- `Running`: Pod is bounded to a Node, and at least one Container in it is runnning.
+- `Succeeded`: Pod is terminated in success.
+- `Failed`: Pod is terminated in failure.
+- `Unknown`: State of Pod cannot be obtained for unknown reason, e.g., communication failure with the Node.
+
+```mermaid
+stateDiagram-v2
+
+[*] --> Pending
+Pending --> Running
+Running --> Succeeded
+Running --> Failed
+```
+
+Containers in Pods may also have following status:
+
+- `Waiting`
+- `Running`
+- `Terminated`
+
+In `spec` for Pod, the `restartPolicy` can be set to following strategies. This policy applies to all the containers in the Pod.
+
+- Always (default)
+- OnFailure
+- Never
+
+The restart is triggered by kubelet with an exponential back-off delay, and it's capped at five minutes. The timer for the container resets if the container runs for 10 minutes.
+
+For example:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-pod
+spec:
+  restartPolicy: Always
+  containers:
+  # ...
+```
+
+### Pod Conditions
+
+Pod has a set of conditions:
+
+- **PodScheduled**: Pod scheduled to a Node
+- **ContainersReady**: All containers are ready
+- **Initialized**: All init containers are completed (*init containers are specialized containers that run before app containers, they are mainly for initialization usage*)
+- **Ready**: Pod is ready
+
+```sh
+kubectl describe pod/empty-mind-65db6bfcd-z7hvz
+
+# Name:             empty-mind-65db6bfcd-z7hvz
+# Namespace:        default
+# Priority:         0
+# Service Account:  default
+# Node:             minikube/192.168.49.2
+#
+# ....
+#
+# Conditions:
+#   Type              Status
+#   Initialized       True
+#   Ready             True
+#   ContainersReady   True
+#   PodScheduled      True
+```
+
+### Containers Probes
+
+Kubelet periodically applies **Container Probe** to containesr for health check.
+
+**Four Types of Probe Mechanisms**:
+
+- `exec`: execute a command, considered success if it returns 0.
+- `grpc`: performs GRPC call, considered success if `status` of the repsonse is `SERVING`.
+- `httpGet`: performs HTTP GET call, considered success if status code between 200 and 399.
+- `tcpSocket`: performs TCP connects, considered success if the TCP connection is closed right after it opens.
+
+**Probe Outcome**:
+
+- `Success`
+- `Failure`
+- `Unknown` (no action taken, kubelet will continue the probe)
+
+**Type of Probes**:
+
+- `livenessProbe`: check if the container is running.
+  - Not needed if the container crashes on its own.
+- `readinessProbe`: check if the container is ready.
+  - Might be the same as `livenessProbe`, the Pod will not receive any traffic until `readinessProbe` is passed.
+- `startupProbe`: check whether application in container is started, if a startup probe is provided, all other probes are disabled.
+
+
+
+
+
+
+
+
+
+
+
+
+## Kubernetes Service
 
 TODO:
 
