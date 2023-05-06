@@ -455,8 +455,8 @@ spec:
         app: empty-head
     spec:
       containers:
-      - image: docker.io/library/empty-head:latest
-        name: empty-head
+      - name: empty-head
+        image: docker.io/library/empty-head:latest
         resources: {}
 status: {}
 ```
@@ -534,7 +534,7 @@ curl http://127.0.0.1:53441/ping
 # pong at 2023-04-27 11:29:39.135640338 +0000 UTC m=+240.537862673
 ```
 
-## Concepts - Overview
+## Concepts
 
 ### Kubernetes Objects
 
@@ -722,8 +722,6 @@ kubectl get pods --field-selector status.phase=Running
 
 - https://kubernetes.io/docs/concepts/overview/working-with-objects/common-labels/
 
-## Concepts - Cluster Architecture
-
 ### About Nodes
 
 Containers are placed in Pods, and Pods are ran on Nods. Nodes can be virtual/phsical machines. There are two ways create Nodes:
@@ -842,8 +840,6 @@ Kubernetes supports garbage collection for various types of cluster resources, e
 
 TODO: This section isn't important for now, finish it later.
 
-## Containers
-
 ### Images
 
 Image Pull Policy
@@ -887,7 +883,7 @@ spec:
           command: ["/bin/sh","-c","nginx -s quit; while killall -0 nginx; do sleep 1; done"]
 ```
 
-## Workloads
+### Workloads
 
 Workload resources are used to dynamically manage workloads, e.g., without the need of managing Pods manually.
 
@@ -1018,6 +1014,8 @@ kubectl describe pod/empty-mind-65db6bfcd-z7hvz
 
 ### Containers Probes
 
+- https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/
+
 Kubelet periodically applies **Container Probe** to containesr for health check.
 
 **Four Types of Probe Mechanisms**:
@@ -1033,26 +1031,712 @@ Kubelet periodically applies **Container Probe** to containesr for health check.
 - `Failure`
 - `Unknown` (no action taken, kubelet will continue the probe)
 
+E.g.,
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: lifecycle-demo
+spec:
+  containers:
+  - name: lifecycle-demo-container
+    image: nginx
+    lifecycle:
+      postStart:
+        exec:
+          command: ["/bin/sh", "-c", "echo Hello from the postStart handler > /usr/share/message"]
+      preStop:
+        exec:
+          command: ["/bin/sh","-c","nginx -s quit; while killall -0 nginx; do sleep 1; done"]
+```
+
 **Type of Probes**:
 
 - `livenessProbe`: check if the container is running.
   - Not needed if the container crashes on its own.
 - `readinessProbe`: check if the container is ready.
-  - Might be the same as `livenessProbe`, the Pod will not receive any traffic until `readinessProbe` is passed.
-- `startupProbe`: check whether application in container is started, if a startup probe is provided, all other probes are disabled.
+  - Might be the same one as the `livenessProbe`. The Pod will not receive any traffic until `readinessProbe` is passed.
+  - Useful when the app has strict dependencies on other services, where the `livenessProbe` makes sure the app itself is healthy and the `readinessProbe` makes sure all dependencies are ready.
+- `startupProbe` (v1.20): check whether application in container is started.
+  - If a startup probe is provided, all other probes are disabled.
+  - Useful if the apps take a long time to startup.
 
+**Probe Configuration**:
 
+- `initialDelaySeconds`: Initial delay. Defaults 0.
+- `periodSeconds`: Probe frequency. Defaults 10. Minimum is 1.
+- `timeoutSeconds`: Probe timeout. Defaults to 1. Minimum is 1.
+- `successThreshold`: Minimum consequtive success. Defaults to 1. Must be 1 for `liveness` and `startup` Probes. Minimum is 1.
+- `failureThreshold`: Number of failures. After `failureThreshold` times probe failure, Kubernetes consider the overall check fails,
+  the Pod is considered **unhealthy** and may restart the container if necessary.
 
+E.g.,
 
+(Examples copied from https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/)
 
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    test: liveness
+  name: liveness-http
+spec:
+  containers:
+  - name: liveness
+    image: registry.k8s.io/liveness
+    args:
+    - /server
+    livenessProbe:
+      httpGet:
+        path: /healthz
+        port: 8080
+        httpHeaders:
+        - name: Custom-Header
+          value: Awesome
+      initialDelaySeconds: 3
+      periodSeconds: 3
+    readinessProbe:
+      httpGet:
+        path: /healthz
+        port: 8080
+        httpHeaders:
+        - name: Custom-Header
+          value: Awesome
+      initialDelaySeconds: 3
+      periodSeconds: 3
+```
 
+```go
+http.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
+    duration := time.Now().Sub(started)
+    if duration.Seconds() > 10 {
+        w.WriteHeader(500)
+        w.Write([]byte(fmt.Sprintf("error: %v", duration.Seconds())))
+    } else {
+        w.WriteHeader(200)
+        w.Write([]byte("ok"))
+    }
+})
+```
 
+### HTTP Probe
 
+Http Probe can be set under field `httpGet`:
 
+- `host`: Host connected. Defaults to Pod IP.
+- `scheme`: HTTP/HTTPS. Defaults to HTTP.
+- `path`: Request Path. Defaults to '/'.
+- `httpHeaders`: Http Headers.
+- `port`: Port used.
 
+### Termination of Pods
 
+The termination procedures is as follows:
 
-## Kubernetes Service
+1. The default graceful shutdown period is 30 seconds. During the grace period, the API Server considers the Pod as `Terminating`,
+  this can be found using `'kubectl describe'`. The Pod will no longer receive any network traffic from the load balancer (or other service).
+  Kubelet begins the Pod shutdown process.
+2. `preStop` hook defined for all containers in the Pod are triggered. If the `preStop` hook is still running after the grace period,
+  `kubelet` waits for another 2 seconds. If a container termination needs a shutdown period longer than 30 seconds,
+  then **`terminationGracePeriodSeconds`** should be configured.
+3. Wihthin the grace period, after all `preStop` hooks finish, `kubelet` sends `SIGTERM` to all containers in the Pod. If the grace period expires (i.e., graceful shutdown tooks longer to finish), `kubelet` triggers forcible shutdown by sending `SIGKILL` to containers.
+
+### Init Containers
+
+- https://kubernetes.io/docs/concepts/workloads/pods/init-containers/
+
+Init Containers are ***'specialized containers that run before app containers in a Pod.'***
+
+- Init containers always run to completion.
+- Each init container must complete successfully before the next one starts.
+
+E.g.,
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: myapp-pod
+  labels:
+    app.kubernetes.io/name: MyApp
+spec:
+  containers:
+  - name: myapp-container
+    image: busybox:1.28
+    command: ['sh', '-c', 'echo The app is running! && sleep 3600']
+  initContainers:
+  - name: init-myservice
+    image: busybox:1.28
+    command: ['sh', '-c', "until nslookup myservice.$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace).svc.cluster.local; do echo waiting for myservice; sleep 2; done"]
+  - name: init-mydb
+    image: busybox:1.28
+    command: ['sh', '-c', "until nslookup mydb.$(cat /var/run/secrets/kubernetes.io/serviceaccount/namespace).svc.cluster.local; do echo waiting for mydb; sleep 2; done"]
+```
+
+### Pods Distruption
+
+- https://kubernetes.io/docs/concepts/workloads/pods/disruptions/
+- https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/
+
+### Pod Quality Of Service Classes
+
+QoS class is assigned to each Pod for resource allocation and constraints. QoS class affects how pods are handled, pods may be evicted from certain nodes under **Node Pressure**.
+
+QoS Classes are assigned by specifying the **request** and **limit** of resources. Request of resource is more like a requirement (lower bound?), and the limit of resource is more like a upper bound. If a container exceeds it's resource limit, it's then killed. Some containers may specify limit value higher than other containers, or may even not specify limit value at all (e.g., the Burstable QoS class).
+
+The QoS classes available are:
+
+- **Guaranteed**: Memory & CPU limit equals to the Memory & CPU request (both request and limit specs are required)
+- **Burstable**: Lower-bound resource guarantees. Pods are allowed to flexibly increase their resources. (Only request spec is required)
+- **BestEffort**: Pods use any mount of the remaining resources available to the Nodes.
+
+Under `Node Pressure` (e.g., in terms of resources), Pods with `BestEffort` are evicted first, then possibly `Burstable`, and then finally `Guaranteed`. Pods with Qos `Guaranteed` are unlikely evicted.
+
+**Cpu Resource Unit**:
+
+CPU Resources are specified as an absolute amount of resources.
+
+- In CPU Unit, 0.5 means half of a physical/virual CPU Core. e.g., '0.1 .... 0.5, 1, 2'
+- In millicores, 500m means '500 millicores' or '500 millicpu', it's the same as '0.5 CPU Unit'. e.g., '500m, 1000m'
+
+**Memory Resource Unit**:
+
+Memory resources are measured in bytes.
+
+- Mebibytes: Ei, Pi, Ti, Gi, Mi, Ki
+- Megabytes: E, P, T, G, M, k
+
+***Note: Megabytes units are power of 10, while Mebibytes units are power of 2. They are roughly the same, but not really the same. I.e., Mebibytes (multiplies of 1024), Megabytes (multiplies of 1000) ***
+
+E.g.,
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: frontend
+spec:
+  containers:
+  - name: app
+    image: images.my-company.example/app:v4
+    resources:
+      requests:
+        memory: "64Mi"
+        cpu: "0.25" # same as 250m
+      limits:
+        memory: "128Mi"
+        cpu: "500m" # same as 0.5
+```
+
+### Inject Data to Containers
+
+- https://kubernetes.io/docs/concepts/workloads/pods/downward-api/
+- https://kubernetes.io/docs/tasks/inject-data-application/environment-variable-expose-pod-information/
+
+Without using Kubernetes API, data may be injected into Containers using **environment variables**. The Pod fields may also be injected dynamically in forms of environment variables, using the fields: `fieldRef` and `resourceFieldRef`.
+
+E.g.,
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dapi-envars-fieldref
+spec:
+  containers:
+    - name: test-container
+      image: registry.k8s.io/busybox
+      command: [ "sh", "-c"]
+      args:
+      - while true; do
+          echo -en '\n';
+          printenv MY_NODE_NAME MY_POD_NAME MY_POD_NAMESPACE;
+          printenv MY_POD_IP MY_POD_SERVICE_ACCOUNT;
+          sleep 10;
+        done;
+      env:
+        - name: MY_NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: MY_POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+```
+
+The Pod's `spec.nodeName` is then automatically set to environment variable `MY_NODE_NAME` for the container to access.
+
+### Deployments
+
+***A Deployment provides declarative updates for Pods and ReplicaSets.*** ReplicaSets managed by Deployments should not be managed by users manually.
+
+#### Create Deployment
+
+The following example is a declarative Deployment resource. The name of the deployment is 'nginx-deployment' (`metadata.name: nginx-deployment`). The deployment creates a `ReplicaSet` that controls three replicated Pods (`spec.replicas: 3`), the `ReplicaSet` manages Pods that contain the label 'app=nginx' (`spec.selector.matchLabels.app: nginx`).
+
+The `PodTemplate` declared in the deployment will create Pods with the label 'app=nginx' (`spec.template.metadata.labels.app: nginx`), thus the Pods created will be managed by the `ReplicaSet` mentioned above. The `PodTemplate` also specifies that the containers will be of name 'nginx' using the image 'nginx:1.14.2' (`spec.template.spec.containers`).
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-deployment
+  labels:
+    app: nginx
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: nginx
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:1.14.2
+        ports:
+        - containerPort: 80
+```
+
+Once the Deployment is applied (using `kubectl apply -f deployment.yaml`), the deployment starts rolling out. We can view the rollout status as follows:
+
+```sh
+kubectl rollout status deployment/nginx-deployment
+
+# Waiting for rollout to finish: 2 out of 3 new replicas have been updated...
+# deployment "nginx-deployment" successfully rolled out
+```
+
+Since the deployment resource specifies a `ReplicaSet` as well, we can also view the `ReplicaSet` created as follows:
+
+```sh
+# short verion: kubectl get rs
+kubectl get replicaset
+
+# NAME               READY   UP-TO-DATE   AVAILABLE   AGE
+# nginx-deployment   3/3     3            3           18s
+```
+
+We can also use `describe` command to view the details of a `ReplicaSet`:
+
+```sh
+kubectl get rs
+# NAME                   DESIRED   CURRENT   READY   AGE
+# empty-mind-65db6bfcd   1         1         1       43h
+# mega-head-b69865c7c    1         1         1       43h
+
+kubectl describe replicaset/empty-mind-65db6bfcd
+# Name:           empty-mind-65db6bfcd
+# Namespace:      default
+# Selector:       app=empty-mind,pod-template-hash=65db6bfcd
+# Labels:         app=empty-mind
+#                 pod-template-hash=65db6bfcd
+# Annotations:    deployment.kubernetes.io/desired-replicas: 1
+#                 deployment.kubernetes.io/max-replicas: 2
+#                 deployment.kubernetes.io/revision: 1
+# Controlled By:  Deployment/empty-mind
+# Replicas:       1 current / 1 desired
+# Pods Status:    1 Running / 0 Waiting / 0 Succeeded / 0 Failed
+# Pod Template:
+#   Labels:  app=empty-mind
+#            pod-template-hash=65db6bfcd
+#   Containers:
+#    empty-mind:
+#     Image:        docker.io/library/empty-mind:latest
+#     Port:         8081/TCP
+#     Host Port:    0/TCP
+#     Environment:  <none>
+#     Mounts:       <none>
+#   Volumes:        <none>
+# Events:           <none>
+```
+
+#### Update Deployment
+
+Rollout is only riggered if the `spec.template` is changed. E.g., we change the container image version, we then apply the new deployment file.
+
+```sh
+kubectl apply -f deployment.yaml
+# deployment.apps/empty-mind configured
+```
+
+Then we check the rollout status:
+
+```sh
+kubectl rollout status deployment/empty-mind
+
+# Waiting for deployment "empty-mind" rollout to finish: 1 old replicas are pending termination...
+```
+
+We can also notice that new Pods are created. During the rollout, old Pods are replaced with new Pods gradually depending on the `RollingUpdateStrategy`.
+
+```sh
+kubectl get pods
+
+# NAME                          READY   STATUS              RESTARTS      AGE
+# empty-mind-65db6bfcd-z7hvz    1/1     Running             3 (18h ago)   43h
+# empty-mind-7fcd5b696d-2mtng   0/1     ErrImageNeverPull   0             74s
+# mega-head-b69865c7c-rs6cs     1/1     Running             3 (18h ago)   44h
+```
+
+We describe the deployment, the revision is also changed from 1 to 2. There are also two ReplicaSet, a new one is being created. We can also notice the Hash values are different (65db6bfcd and 7fcd5b696d) because the PodTemplate is changed.
+
+```sh
+kubectl describe deployment/empty-mind
+
+# Name:                   empty-mind
+# Namespace:              default
+# CreationTimestamp:      Thu, 04 May 2023 19:02:23 +0800
+# Labels:                 app=empty-mind
+# Annotations:            deployment.kubernetes.io/revision: 2
+# Selector:               app=empty-mind
+# Replicas:               1 desired | 1 updated | 2 total | 1 available | 1 unavailable
+# StrategyType:           RollingUpdate
+# MinReadySeconds:        0
+# RollingUpdateStrategy:  25% max unavailable, 25% max surge
+# Pod Template:
+#   Labels:  app=empty-mind
+#   Containers:
+#    empty-mind:
+#     Image:        docker.io/library/empty-mind:v1
+#     Port:         <none>
+#     Host Port:    <none>
+#     Environment:  <none>
+#     Mounts:       <none>
+#   Volumes:        <none>
+# Conditions:
+#   Type           Status  Reason
+#   ----           ------  ------
+#   Available      True    MinimumReplicasAvailable
+#   Progressing    True    ReplicaSetUpdated
+# OldReplicaSets:  empty-mind-65db6bfcd (1/1 replicas created)
+# NewReplicaSet:   empty-mind-7fcd5b696d (1/1 replicas created)
+# Events:
+#   Type    Reason             Age    From                   Message
+#   ----    ------             ----   ----                   -------
+#   Normal  ScalingReplicaSet  3m10s  deployment-controller  Scaled up replica set empty-mind-7fcd5b696d to 1
+```
+
+#### Rollover
+
+Rollover means multiple updates at the same time. Say we have Deployment with the image verion v1 and 3 replicas. The deployment is finished.
+
+Then we update the deployment pod template to use image v2. Kubernetes starts replacing Pods with image v1 to Pods with image v2. The replicas count is still 3. Meaning that after the rollout, there will be 3 Pods with image v2.
+
+During the rollout, assume that Kubernetes already created two Pods with image v2, there is only one left. We suddenly change the pod template again for this deployment by setting image verion to v3.
+
+Since the prevous rollout is not completed yet. Kubernetes doesn't wait for the prevous rollout. Instead, it kills those two Pods with the image v2, and immediately starts rolling out the deployment for v3.
+
+#### Rollback deployment
+
+If the rollout fails, we may want to rollback to the previous version. In the examples above, the rollout was failed because the image cannot be pulled. We can check the revisions of the deployment:
+
+```sh
+kubectl rollout history deployment/empty-mind
+
+# deployment.apps/empty-mind
+# REVISION  CHANGE-CAUSE
+# 1         <none>
+# 2         <none>
+```
+
+If we were using `kubectl set` command, the `CHANGE-CAUSE` will be displaying the command instead. So basically, we want to rollback to revision 1. Before we do that, we can also check the details of a specific revision:
+
+```sh
+kubectl rollout history deployment/empty-mind --revision=2
+
+# deployment.apps/empty-mind with revision #2
+# Pod Template:
+#   Labels:       app=empty-mind
+#         pod-template-hash=7fcd5b696d
+#   Containers:
+#    empty-mind:
+#     Image:      docker.io/library/empty-mind:v1
+#     Port:       <none>
+#     Host Port:  <none>
+#     Environment:        <none>
+#     Mounts:     <none>
+#   Volumes:      <none>
+```
+
+To rollback, we can either rollback to previous revision:
+
+```sh
+kubectl rollout undo deployment/empty-mind
+```
+
+or to a specific revision:
+
+```sh
+kubectl rollout undo deployment/empty-mind --to-revision=1
+```
+
+***The ReplicaSet for old versions are kept by Kubernetes for rollback, don't delete them. We may change the `spec.revisionHistoryLimit` value tho, it's by default 10.***
+
+#### Scale Deployment
+
+The number of replicas created for a deployment is controlled by the `spec.replicas`. We can either change the value, or use the CLI.
+
+```sh
+kubectl scale deployment/empty-mind --replicas=3
+```
+
+We can also do [Horizontal Pod Autoscaling](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale-walkthrough/):
+
+```sh
+# scales based on CPU utilization
+kubectl autoscale deployment/empty-mind --min=1 --max=3 --cpu-percent=80
+```
+
+#### Pause & Resume Rollout
+
+To pause a rollout:
+
+```sh
+kubectl rollout pause deployment/empty-mind
+```
+
+To resume a rollout:
+
+```sh
+kubectl rollout resume deployment/empty-mind
+```
+
+To check the status of a rollout:
+
+```sh
+kubectl rollout status deployment/empty-mind
+```
+
+#### Writing Deployment Spec
+
+- Deployment
+  - `apiVersion`
+  - `kind`
+  - `metadata`
+  - PodTemplate
+    - `spec.template`
+    - `spec.selector`
+  - Replicas
+    - `spec.replicas`
+  - Selector
+    - `spec.selector` (must match the `spec.template.metadata.labels`, it's immutable after creation)
+  - Rolling Update Strategy
+    - `spec.strategy`
+      - `spec.strategy.type` (`Recreate` or `RollingUpdate`, `RollingUpdate` is the default)
+      - `spec.strategy.rollingUpdate.maxUnavailable` (max num of Pods that can be unavailable during update, defaults to '25%')
+      - `spec.strategy.rollingUpdate.maxSurge` (max num of Pods that can be created over the desired number of Pods, defaults to '25%')
+  - Progress Deadline Seconds
+    - `spec.progressDeadlineSeconds` (max num of seconds to wait for `Progressing` deployment, defaults to 600)
+  - Min Ready Seconds
+    - `spec.minReadySeconds` (min num of seconds before the Pod is considered ready, defaults to 0, Probes will also affect the Readiness as well)
+  - Revision History Limit
+    - `spec.revisionHistoryLimit` (num of old ReplicaSets to retain to allow rollback)
+
+### ReplicaSet
+
+Deployment should be preferred over ReplicaSet.
+
+- https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/
+
+### StatefulSet
+
+<!-- TODO: finish this later -->
+
+- https://kubernetes.io/docs/concepts/workloads/controllers/statefulset/
+
+`StatefulSet` manages stateful applications that require unique network identifiers or persistent storage. `StatefulSet` maintains a sticky identity for each of the Pods, and the persistent identifier for each of the Pods are maintained during rescheduling.
+
+For example, in the following `StatefulSet`, `volumeClaimTemplates` claims a `PersistenVolumns` for the Pods declared. The volumns are persistent even when the `StatefulSet` is deleted or scaled down.
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: web
+spec:
+  selector:
+    matchLabels:
+      app: nginx # has to match .spec.template.metadata.labels
+  serviceName: "nginx"
+  replicas: 3 # by default is 1
+  minReadySeconds: 10 # by default is 0
+  template:
+    metadata:
+      labels:
+        app: nginx # has to match .spec.selector.matchLabels
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+      - name: nginx
+        image: registry.k8s.io/nginx-slim:0.8
+        ports:
+        - containerPort: 80
+          name: web
+        volumeMounts:
+        - name: www
+          mountPath: /usr/share/nginx/html
+  volumeClaimTemplates:
+  - metadata:
+      name: www
+    spec:
+      accessModes: [ "ReadWriteOnce" ]
+      storageClassName: "my-storage-class"
+      resources:
+        requests:
+          storage: 1Gi
+```
+
+### DaemonSet
+
+- https://kubernetes.io/docs/concepts/workloads/controllers/daemonset/
+
+***"A DaemonSet ensures that all eligible nodes run a copy of a Pod."***
+
+### Job (BatchJob)
+
+Job creates one or more Pods to do certain operations. It may backoff and continue to retry if previous exectuion of the Pods are failed depending on the spec.
+
+E.g.,
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: pi
+spec:
+  template:
+    spec:
+      containers:
+      - name: pi
+        image: perl:5.34.0
+        command: ["perl",  "-Mbignum=bpi", "-wle", "print bpi(2000)"]
+      restartPolicy: Never
+  backoffLimit: 4
+```
+
+### CronJob
+
+CronJob is repeatedly scheduled and triggered by kubernetes.
+
+***"By design, a CronJob contains a template for new Jobs. If you modify an existing CronJob, the changes you make will apply to new Jobs that start to run after your modification is complete. Jobs (and their Pods) that have already started continue to run without changes. That is, the CronJob does not update existing Jobs, even if those remain running."***
+
+***"A CronJob creates a Job object approximately once per execution time of its schedule. The scheduling is approximate because there are certain circumstances where two Jobs might be created, or no Job might be created. Kubernetes tries to avoid those situations, but does not completely prevent them. Therefore, the Jobs that you define should be idempotent."***
+
+```yaml
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: hello
+spec:
+  schedule: "* * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+          - name: hello
+            image: busybox:1.28
+            imagePullPolicy: IfNotPresent
+            command:
+            - /bin/sh
+            - -c
+            - date; echo Hello from the Kubernetes cluster
+          restartPolicy: OnFailure
+```
+
+#### Writing CronJob Spec
+
+- `spec.jobTemplate`
+- `spec.startingDeadlineSeconds` (deadline for starting the Job, the Job may missed the scheduled time, after the deadline, the Job is skilled and wait for next scheduled time)
+- `spec.concurrencyPolicy`
+  - `Allow` (default)
+  - `Forbid` (doesn't allow concurrent runs, if current one hasn't finish, new one is skipped)
+  - `Replace` (if current one hasn't finish, it's replaced by the new one)
+
+### Kubernetes Network Model
+
+***"Every Pod in a cluster gets its own unique cluster-wide IP address."*** The **"IP-per-pod"** Model.
+
+Fundamental requirements in Kubernetes Network Model implementation:
+
+- Pods can communicate with all other pods on any other node without NAT
+- Agents on a node (e.g. system daemons, kubelet) can communicate with all pods on that node
+
+Kubernetes networking addresses four concerns (Copied from doc directly):
+
+- Containers within a Pod use networking to communicate via loopback.
+- Cluster networking provides communication between different Pods.
+- The Service API lets you expose an application running in Pods to be reachable from outside your cluster.
+  - Ingress provides extra functionality specifically for exposing HTTP applications, websites and APIs.
+- You can also use Services to publish services only for consumption inside your cluster.
+
+### Kubernetes Service
+
+*"In Kubernetes, a Service is a method for exposing a network application that is running as one or more Pods in your cluster."* `Ingress` can be used as the entry point for the cluster that controls how all HTTP traffic is routed to the workload.
+
+E.g.,
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: nginx
+  labels:
+    app.kubernetes.io/name: proxy
+spec:
+  containers:
+  - name: nginx
+    image: nginx:stable
+    ports:
+      - containerPort: 80
+        name: http-web-svc
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  selector:
+    app.kubernetes.io/name: proxy
+  ports:
+  - name: name-of-service-port
+    protocol: TCP
+    port: 80
+    targetPort: http-web-svc
+```
+
+TCP is the default protocol, so that can be omitted as well. By convention, `port` and `targetPort` should be the same. If the `Service` doesn't have selector, it can abstract workload outside of the cluster as well (e.g., in dev environment, redirect the ports to a local port for local database connection).
+
+A builtin, cluster aware DNS is available throught the cluster. Service discovery can be easily achieved through `nslookup NAMESPACE_NAME.SERVICE_NAME` or `nslookup SERVICE_NAME`.
+
+#### Service Types
+
+The `ClusterIP` and `Ingress` are more frequently used.
+
+- `ClusterIP`: Expose the service on cluster-internal IP, the service is only reachable within the cluster (the default, if service type is not specified).
+- `NodePort`: Expose the service on each Node's IP at a specific port. To make the port available, a ClusterIp will still be setup. Under certain configuration (e.g., a exposed Tunnel), the port may be accessible to extern clients.
+- `LoadBalancer`: Expose the service externally using cloud provider's load balancer. The cloud provider's load balaner will route traffic to this exposed `LoadBalancer` service.
+- `ExternalName`: Map services to a DNS name. A CNAME resource record is created, but no proxying is setup.
+
+Example of `ExternalName`:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+  namespace: prod
+spec:
+  type: ExternalName
+  externalName: my.database.example.com
+```
 
 TODO:
 
@@ -1061,4 +1745,4 @@ TODO:
 - Connect Applications Service: https://kubernetes.io/docs/tutorials/services/connect-applications-service/
 - kuby by example - Networking in Kubernetes: https://kubebyexample.com/learning-paths/application-development-kubernetes/lesson-3-networking-kubernetes/exposing
 - DNS Debugging Resolution: https://kubernetes.io/docs/tasks/administer-cluster/dns-debugging-resolution/
-
+ -->

@@ -18,7 +18,7 @@ spec:
         app: mega-head
     spec:
       containers:
-      - image: docker.io/library/mega-head:latest
+      - image: docker.io/library/mega-head:v0.0.1
         name: mega-head
         resources: {}
         imagePullPolicy: Never

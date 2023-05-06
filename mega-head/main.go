@@ -10,7 +10,7 @@ import (
 
 func main() {
 
-	common.ScheduleCron("0/5 * * * * *", func() {
+	common.ScheduleCron("0/15 * * * * *", func() {
 		ec := common.EmptyExecContext()
 
 		client := client.NewDefaultTClient(ec.Ctx, "http://empty-mind:8081/ping")

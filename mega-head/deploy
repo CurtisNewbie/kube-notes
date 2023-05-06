@@ -1,13 +1,12 @@
 #!/bin/bash
 
-docker build . -t mega-head:latest
+ver="v0.0.1"
 
-kubectl delete deployment mega-head
+# build docker image
+docker build . -t "mega-head:$ver"
 
-sleep 3
+# load image to minikube
+minikube image load "mega-head:$ver"
 
-minikube image rm docker.io/library/mega-head:latest
-
-minikube image load mega-head:latest
-
+# apply the change, if the pod template is updated, this triggers a rollout
 kubectl apply -f deployment.yaml
