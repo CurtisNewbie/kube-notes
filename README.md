@@ -1751,6 +1751,8 @@ spec:
 
 ### Ingress
 
+***Ingress Addons doesn't work on MacOS, use --driver=hyperkit will fix it***
+
 - https://kubernetes.io/docs/concepts/services-networking/ingress-controllers/
 - https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
 
@@ -1994,10 +1996,41 @@ spec:
               number: 80
 ```
 
+### Ingress Nginx
+
+The following is an example of Ingress resource specified for Nginx Ingress Controller.
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nice-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: "/$1"
+spec:
+  rules:
+  - host: dummy.com
+    http:
+      paths:
+      - pathType: Prefix
+        path: "/(.*)"
+        backend:
+          service:
+            name: empty-mind
+            port:
+              number: 8081
+```
+
+The Ingress resource
+
+TODO
+
 ### Kube-proxy, CNI and The Overall Network Model
 
+- https://diego.assencio.com/?index=d71346b8737ee449bb09496784c9b344
 - https://itnext.io/an-illustrated-guide-to-kubernetes-networking-part-1-d1ede3322727
-- Linux IP Masquerade: https://tldp.org/HOWTO/IP-Masquerade-HOWTO/ipmasq-background2.1.html
+- https://tldp.org/HOWTO/IP-Masquerade-HOWTO/ipmasq-background2.1.html
 - https://www.tkng.io/arch/
 - https://arthurchiao.art/blog/cracking-k8s-node-proxy/
 - https://cloud.google.com/kubernetes-engine/docs/concepts/network-overview
@@ -2005,6 +2038,7 @@ spec:
 - https://www.tigera.io/learn/guides/kubernetes-networking/kubernetes-cni/
 - https://www.hwchiu.com/introduce-cni-i.html
 - https://www.suse.com/c/rancher_blog/comparing-kubernetes-cni-providers-flannel-calico-canal-and-weave/
+- https://cloud.google.com/kubernetes-engine/docs/concepts/gke-compare-network-models
 
 `Kube-proxy` works essentially by constantly updating the IPTable on each Node (a `DaemonSet`), with which it routes the traffic to the backend(s) hidden by virtual IPs via NAT (Network Address Translation). The same logic is almost applied in all other relavent components as well, e.g., Ingress. The NAT is achieved by a set of IPTable Rules. The routed traffic is foundamentally handled by the CNI plugin (e.g., flannel, weave and calico).
 
@@ -2034,16 +2068,14 @@ CNI installed a virtual network interface on the Kernel, and `kube-proxy` mainta
 
 It basically does three things:
 
-- Configure itself by reading the ENV variables available in Cluster (the CNI itself is also deployed on each Node) or from configMap or from kubeadm; it basically includes determining the subnets, mtu or other configuration that it will be using.
-- Periodically configure and refresh the IP Masquerading rules by modifying IP Table Masquerading Rules.
-- Uses the Kubernetes API to periodically fetch (from Control Plane) addresses accessible to the list of Nodes, and creates links to these Nodes (using interal IPs) by configuring Linux Netlink (available commands are: `route -n`, `netstat -rn` and `ip route`).
+1. Configure itself by reading the ENV variables available in Cluster (the CNI itself is also deployed on each Node, cos it's a container thing :D) or from configMap or from kubeadm; it basically includes determining the subnets, mtu or other configuration that it will be using.
+2. Periodically configure and refresh the IP Masquerading rules by modifying IP Table Masquerading Rules.
+3. Uses the Kubernetes API to periodically fetch addresses accessible to the list of Nodes (from Control Plane), and creates links to these Nodes by configuring Linux Netlink (available commands are: `route -n`, `netstat -rn` and `ip route`).
 
 ```sh
 ip route
 # default via 192.168.49.1 dev eth0
 # 10.244.0.0/16 dev bridge proto kernel scope link src 10.244.0.1
-# 172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1 linkdown
-# 192.168.49.0/24 dev eth0 proto kernel scope link src 192.168.49.2
 
 ip addr show dev bridge
 # 5: bridge: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
@@ -2052,7 +2084,7 @@ ip addr show dev bridge
 #        valid_lft forever preferred_lft forever
 ```
 
-The netlinks above tells that any packets sent to any IP addresses in subnet `10.244.0.0/16` must go though the network interface `bridge`. The `bridge` network interface is a BROADCAST, MULTICAST network connection. (*"The bridges act as switches, and send a broadcast frame out every interface except the one where it was received."*)
+The net link above tells that any packet sent to any IP addresses in subnet `10.244.0.0/16` must go though the network interface `bridge`. The `bridge` network interface is a BROADCAST, MULTICAST network connection. (*"The bridges act as switches, and send a broadcast frame out every interface except the one where it was received."*)
 
 ---
 
