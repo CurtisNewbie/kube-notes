@@ -1996,6 +1996,8 @@ spec:
 
 ### Kube-proxy, CNI and The Overall Network Model
 
+- https://itnext.io/an-illustrated-guide-to-kubernetes-networking-part-1-d1ede3322727
+- Linux IP Masquerade: https://tldp.org/HOWTO/IP-Masquerade-HOWTO/ipmasq-background2.1.html
 - https://www.tkng.io/arch/
 - https://arthurchiao.art/blog/cracking-k8s-node-proxy/
 - https://cloud.google.com/kubernetes-engine/docs/concepts/network-overview
@@ -2012,11 +2014,55 @@ kubectl get svc
 # empty-mind   ClusterIP   10.100.154.189   <none>        8081/TCP   3d21h
 ```
 
-The Virtual IP assigned to `empty-mind` is `10.100.154.189`. It's not publicly accessible, since it's a virtual IP within the Cluster, it's not a real IP address assigned physically. We cannot connect to the `Node` from any machine that is itself not a `Node` using that VIP, since we don't have the `routes` configured and the virtual network connected (by CNI). Traffic to this VIP address is managed and routed by the `kube-proxy` deployed on each `Node`. Always remember that `kube-proxy` is a `Node` thing, not a `Pod` thing. So, from the `Pod`'s perspective, no NAT device is involved.  The host somehow can route traffic to where it should go. If the traffic destination is a `Service`, the DNS configuration translates the domain name to a virtual IP address, the traffic is then redirected to the `Pod` address (still a virtual IP address), which is then handled by the CNI plugin (the implementation of the network). If the traffic destination is another container within the Pod, the traffic is routed to the `Container` using `Loopback` interface.
+The Virtual IP assigned to `empty-mind` is `10.100.154.189`. It's not publicly accessible, since it's a virtual IP within the Cluster, it's not a real IP address assigned physically. We cannot connect to the `Node` from any machine that is itself not a `Node` using that VIP, since we don't have the `routes` configured and the virtual network connected (by CNI). Traffic to this VIP address is managed and routed by the `kube-proxy` deployed on each `Node`.
+
+Always remember that `kube-proxy` is a `Node` thing, not a `Pod` thing. So, from the `Pod`'s perspective, no NAT device is involved.  The host somehow can route traffic to where it should go. If the traffic destination is a `Service`, the DNS configuration translates the domain name to a virtual IP address, the traffic is then redirected to the `Pod` address (still a virtual IP address), which is then handled by the CNI plugin (the implementation of the network). If the traffic destination is another container within the Pod, the traffic is routed to the `Container` using `Loopback` interface.
 
 **To describe what the CNI does:**
 
-Each Node is deployed and configured a Virtual Network Interface. This interface encapsulates the virtual network implementation, the virtual network can be something like a Overlay network, VLan or somthing else, that somehow connects the group of Nodes available. Each `Node` knows where other `Node`s are located via communication with the `Control Plane`. I.e., the CNI maintains a table of `Node`s, it knows how to route the traffic between the `Node`s, and how the traffic is actually transferred deesn't really matter (e.g., through some sort of UDP and packet modification, or even SSH tunneling; Flannel configures a layer 3 IPv4 overlay network; Calico configures a BGP to route packets; Weave configures a Mesh Overlay Network). CNI installed a virtual network interface on the Kernel, and `kube-proxy` maintains the set of rules used to route the traffic to that virtual network interface. The overall model is clean and well encapsulated.
+Each Node is deployed and configured a Virtual Network Interface. This interface encapsulates the virtual network implementation, the virtual network can be something like a Overlay network, VLan or somthing else, that somehow connects the group of Nodes available. Each `Node` knows where other `Node`s are located via communication with the `Control Plane`.
+
+I.e., the CNI maintains a table of `Node`s, it knows how to route the traffic between the `Node`s, and how the traffic is actually transferred deesn't really matter (e.g., through some sort of UDP and packet modification, or even SSH tunneling; Flannel configures a layer 3 IPv4 overlay network; Calico configures a BGP to route packets; Weave configures a Mesh Overlay Network).
+
+CNI installed a virtual network interface on the Kernel, and `kube-proxy` maintains the set of rules used to route the traffic to that virtual network interface. Within the cluster, every Nodes manages a subnet for the Pods running on it. The overall model is clean and well encapsulated.
+
+***Kindnet is a very simple implementation of CNI (https://www.tkng.io/cni/kindnet/). This implementation only contains 6 .go files! (https://github.com/aojea/kindnet#kindnet-components)***
+
+---
+
+#### Kindnet
+
+It basically does three things:
+
+- Configure itself by reading the ENV variables available in Cluster (the CNI itself is also deployed on each Node) or from configMap or from kubeadm; it basically includes determining the subnets, mtu or other configuration that it will be using.
+- Periodically configure and refresh the IP Masquerading rules by modifying IP Table Masquerading Rules.
+- Uses the Kubernetes API to periodically fetch (from Control Plane) addresses accessible to the list of Nodes, and creates links to these Nodes (using interal IPs) by configuring Linux Netlink (available commands are: `route -n`, `netstat -rn` and `ip route`).
+
+```sh
+ip route
+# default via 192.168.49.1 dev eth0
+# 10.244.0.0/16 dev bridge proto kernel scope link src 10.244.0.1
+# 172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1 linkdown
+# 192.168.49.0/24 dev eth0 proto kernel scope link src 192.168.49.2
+
+ip addr show dev bridge
+# 5: bridge: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+#     link/ether d2:13:cb:8f:3d:4d brd ff:ff:ff:ff:ff:ff
+#     inet 10.244.0.1/16 brd 10.244.255.255 scope global bridge
+#        valid_lft forever preferred_lft forever
+```
+
+The netlinks above tells that any packets sent to any IP addresses in subnet `10.244.0.0/16` must go though the network interface `bridge`. The `bridge` network interface is a BROADCAST, MULTICAST network connection. (*"The bridges act as switches, and send a broadcast frame out every interface except the one where it was received."*)
+
+---
+
+#### Some description of the idea IP MASQ (Masquerading):
+
+***"Masquerading is a special case of Source Network Address Translation (SNAT) and allows you to masquerade an internal network (typically, your LAN Local Area Network with private address space) behind a single, official IP. address on a network interface (typically, your external interface connected to the Internet)."***
+
+---
+
+#### Examples of kube-proxy Managed Routing Rules
 
 The below examples are some of the IPTable rules maintained by `kube-proxy` (by contacting the **Control Plane**, the `kube-proxy` knows when a `Node` is joined to or removed from the cluster). The output is retrieved from the Node. Notice that with Minikube, the Kubernetes is actually deployed as a Container ( Container inside another Container :D ).
 
@@ -2081,3 +2127,5 @@ iptables -t nat -nvL KUBE-SEP-AFYS27EZD27BHQIB
 ```
 
 Finally the packet is routed to `10.244.0.96`, which is understood and handled by the CNI plugin.
+
+
