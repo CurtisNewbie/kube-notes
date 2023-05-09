@@ -2,6 +2,10 @@
 
 Notes for kubernetes
 
+- Cracking Kubernetes Node Proxy: https://arthurchiao.art/blog/cracking-k8s-node-proxy/
+- Google Kubernets Engine - Network Overview: https://cloud.google.com/kubernetes-engine/docs/concepts/network-overview
+- Kubernetes Secure Internal Networking: https://medium.com/google-cloud/secure-kubernetes-internal-networking-5f2556f7efde
+- Abbr in Kubernetes: https://blog.heptio.com/kubectl-resource-short-names-heptioprotip-c8eff9fb7202
 - Goffinet.org About Containers and Kubernetes: https://containers.goffinet.org/containers/001-intro.html#introduction
 - Minikube vs Kind vs k3s: https://shipit.dev/posts/minikube-vs-kind-vs-k3s.html
 - Minikube Tutorial: https://minikube.sigs.k8s.io/docs/start/
@@ -9,6 +13,7 @@ Notes for kubernetes
 - Kubectl Cheat Sheet: https://kubernetes.io/docs/reference/kubectl/cheatsheet/#bash
 - Nginx Ingress Controller: https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/
 - Ingress nginx for TCP and UDP services (Minikube): https://minikube.sigs.k8s.io/docs/tutorials/nginx_tcp_udp_ingress/
+- https://www.yuque.com/u2022521/kb/fyt7gq
 
 
 ## Getting Started
@@ -1678,6 +1683,12 @@ Kubernetes networking addresses four concerns (Copied from doc directly):
 
 ### Kubernetes Service
 
+- ClusterIp: https://medium.com/the-programmer/working-with-clusterip-service-type-in-kubernetes-45f2c01a89c8
+- Sysdig Kubernetes Service: https://sysdig.com/blog/kubernetes-services-clusterip-nodeport-loadbalancer/
+- Connect Applications Service: https://kubernetes.io/docs/tutorials/services/connect-applications-service/
+- kuby by example - Networking in Kubernetes: https://kubebyexample.com/learning-paths/application-development-kubernetes/lesson-3-networking-kubernetes/exposing
+- DNS Debugging Resolution: https://kubernetes.io/docs/tasks/administer-cluster/dns-debugging-resolution/
+
 *"In Kubernetes, a Service is a method for exposing a network application that is running as one or more Pods in your cluster."* `Ingress` can be used as the entry point for the cluster that controls how all HTTP traffic is routed to the workload.
 
 E.g.,
@@ -1714,7 +1725,7 @@ spec:
 
 TCP is the default protocol, so that can be omitted as well. By convention, `port` and `targetPort` should be the same. If the `Service` doesn't have selector, it can abstract workload outside of the cluster as well (e.g., in dev environment, redirect the ports to a local port for local database connection).
 
-A builtin, cluster aware DNS is available throught the cluster. Service discovery can be easily achieved through `nslookup NAMESPACE_NAME.SERVICE_NAME` or `nslookup SERVICE_NAME`.
+A builtin, cluster aware DNS is available throughout the cluster. Service discovery can be easily achieved through `nslookup NAMESPACE_NAME.SERVICE_NAME` or `nslookup SERVICE_NAME`, we still need to specify the ports tho whe we requests the pods behind the services.
 
 #### Service Types
 
@@ -1738,11 +1749,335 @@ spec:
   externalName: my.database.example.com
 ```
 
-TODO:
+### Ingress
 
-- ClusterIp: https://medium.com/the-programmer/working-with-clusterip-service-type-in-kubernetes-45f2c01a89c8
-- Sysdig Kubernetes Service: https://sysdig.com/blog/kubernetes-services-clusterip-nodeport-loadbalancer/
-- Connect Applications Service: https://kubernetes.io/docs/tutorials/services/connect-applications-service/
-- kuby by example - Networking in Kubernetes: https://kubebyexample.com/learning-paths/application-development-kubernetes/lesson-3-networking-kubernetes/exposing
-- DNS Debugging Resolution: https://kubernetes.io/docs/tasks/administer-cluster/dns-debugging-resolution/
- -->
+- https://kubernetes.io/docs/concepts/services-networking/ingress-controllers/
+- https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
+
+***"An Ingress may be configured to give Services externally-reachable URLs, load balance traffic, terminate SSL / TLS, and offer name-based virtual hosting ... Ingress exposes HTTP and HTTPS routes from outside the cluster to services within the cluster. Traffic routing is controlled by rules defined on the Ingress resource."***
+
+`Ingress Controller` is needed to fulfill the `Ingress`. An example of `Ingress Controller` is [ingress-nginx](https://kubernetes.github.io/ingress-nginx/deploy/).
+
+Ingress Resource Example:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: minimal-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx-example
+  rules:
+  - http:
+      paths:
+      - path: /testpath
+        pathType: Prefix
+        backend:
+          service:
+            name: test
+            port:
+              number: 80
+```
+
+#### Ingress Spec
+
+- `spec.ingressClassName`: If the class name is omitted, the default ingress class should be defined. It's essentially used to specify which Ingress Controller that we want to use.
+- `spec.rules`: Rules of Ingress that routes traffic to associated services.
+- `spec.defaultBackend`: An Ingress with no rules, the request doesn't match any rule specified, the traffic is routed to the default backend. (If `spec.rules` are not specified, default backed is required).
+
+#### Ingress Rules
+
+An Ingress Rule may contain:
+
+1. Optional host (if absent, requests are routed based on IP address specified on requests)
+2. List of paths (requests are still mainly routed by Host name tho), each with an associated backend defined with `service.name` and a `service.port.name` or `service.port.number`.
+3. A backend (combination of service name and port).
+
+#### Path Types
+
+- `ImplementationSpecific`: Path matching is up to the implementation.
+- `Exact`: Exact match (case sensitive). `Exact` has higher priority over `Prefix`.
+- `Prefix`: Match based on prefix (case sensitive).
+
+#### Hostname Matching
+
+Host name be matched extractly or fuzzily using a wildcard. Hosts are specified in HTTP `host` header. The wildcard `*` only matches one single DNS label (delimited by a `.`). For example, `bar.foo.com` matches `*.foo.com`, but `baz.bar.foo.com` doesn't match `*.foo.com` and `foo.com` doesn't match `*.foo.com` as well.
+
+E.g,
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-wildcard-host
+spec:
+  rules:
+  - host: "foo.bar.com"
+    http:
+      paths:
+      - pathType: Prefix
+        path: "/bar"
+        backend:
+          service:
+            name: service1
+            port:
+              number: 80
+  - host: "*.foo.com"
+    http:
+      paths:
+      - pathType: Prefix
+        path: "/foo"
+        backend:
+          service:
+            name: service2
+            port:
+              number: 80
+```
+
+#### Resource Backends
+
+Resource Backends are commonly used for static resources that can be served by a ObjectStorage.
+
+e.g.,
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-resource-backend
+spec:
+  defaultBackend:
+    resource:
+      apiGroup: k8s.example.com
+      kind: StorageBucket
+      name: static-assets
+  rules:
+    - http:
+        paths:
+          - path: /icons
+            pathType: ImplementationSpecific
+            backend:
+              resource:
+                apiGroup: k8s.example.com
+                kind: StorageBucket
+                name: icon-assets
+```
+
+#### Ingress Backed By Single Service
+
+By specifying Default Backend, all traffic will be routed to a single service.
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: test-ingress
+spec:
+  defaultBackend:
+    service:
+      name: test
+      port:
+        number: 80
+```
+
+#### Ingress Fanout
+
+With Fanout, the traffic from a single IP address (the same source) is routed to multiple services based on the rules. It's called fanout, but it's not really like broadcasting.
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: simple-fanout-example
+spec:
+  rules:
+  - host: foo.bar.com
+    http:
+      paths:
+      - path: /foo
+        pathType: Prefix
+        backend:
+          service:
+            name: service1
+            port:
+              number: 4200
+      - path: /bar
+        pathType: Prefix
+        backend:
+          service:
+            name: service2
+            port:
+              number: 8080
+```
+
+All the traffic to `foo.bar.com` is routed to `service1` and `service2` based on the path.
+
+#### Name Based Virtual Hosting
+
+The traffic is routed based on the `Host` specified in requests.
+
+E.g.,
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: name-virtual-host-ingress
+spec:
+  rules:
+  - host: foo.bar.com
+    http:
+      paths:
+      - pathType: Prefix
+        path: "/"
+        backend:
+          service:
+            name: service1
+            port:
+              number: 80
+  - host: bar.foo.com
+    http:
+      paths:
+      - pathType: Prefix
+        path: "/"
+        backend:
+          service:
+            name: service2
+            port:
+              number: 80
+```
+
+All traffic to `foo.bar.com` is routed to `service`, and all traffic to `bar.foo.com` is routed to `service2`.
+
+#### TLS For Ingress
+
+<!-- TODO: learn more about this later -->
+
+Ingress can be secured by specifying a TLS private key and certificate. By default, Ingress assumes that the TLS terminates at Ingress.
+
+```yaml
+# Secret
+apiVersion: v1
+kind: Secret
+metadata:
+  name: testsecret-tls
+  namespace: default
+data:
+  tls.crt: base64 encoded cert
+  tls.key: base64 encoded key
+type: kubernetes.io/tls
+
+---
+
+# Ingress Resource
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: tls-example-ingress
+spec:
+  tls:
+  - hosts:
+      - https-example.foo.com
+    secretName: testsecret-tls
+  rules:
+  - host: https-example.foo.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: service1
+            port:
+              number: 80
+```
+
+### Kube-proxy, CNI and The Overall Network Model
+
+- https://www.tkng.io/arch/
+- https://arthurchiao.art/blog/cracking-k8s-node-proxy/
+- https://cloud.google.com/kubernetes-engine/docs/concepts/network-overview
+- https://kubebyexample.com/learning-paths/application-development-kubernetes/lesson-3-networking-kubernetes/exposing#:~:text=When%20pods%20are%20created%2C%20they,by%20using%20the%20localhost%20address.
+- https://www.tigera.io/learn/guides/kubernetes-networking/kubernetes-cni/
+- https://www.hwchiu.com/introduce-cni-i.html
+- https://www.suse.com/c/rancher_blog/comparing-kubernetes-cni-providers-flannel-calico-canal-and-weave/
+
+`Kube-proxy` works essentially by constantly updating the IPTable on each Node (a `DaemonSet`), with which it routes the traffic to the backend(s) hidden by virtual IPs via NAT (Network Address Translation). The same logic is almost applied in all other relavent components as well, e.g., Ingress. The NAT is achieved by a set of IPTable Rules. The routed traffic is foundamentally handled by the CNI plugin (e.g., flannel, weave and calico).
+
+```sh
+kubectl get svc
+# NAME         TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)    AGE
+# empty-mind   ClusterIP   10.100.154.189   <none>        8081/TCP   3d21h
+```
+
+The Virtual IP assigned to `empty-mind` is `10.100.154.189`. It's not publicly accessible, since it's a virtual IP within the Cluster, it's not a real IP address assigned physically. We cannot connect to the `Node` from any machine that is itself not a `Node` using that VIP, since we don't have the `routes` configured and the virtual network connected (by CNI). Traffic to this VIP address is managed and routed by the `kube-proxy` deployed on each `Node`. Always remember that `kube-proxy` is a `Node` thing, not a `Pod` thing. So, from the `Pod`'s perspective, no NAT device is involved.  The host somehow can route traffic to where it should go. If the traffic destination is a `Service`, the DNS configuration translates the domain name to a virtual IP address, the traffic is then redirected to the `Pod` address (still a virtual IP address), which is then handled by the CNI plugin (the implementation of the network). If the traffic destination is another container within the Pod, the traffic is routed to the `Container` using `Loopback` interface.
+
+**To describe what the CNI does:**
+
+Each Node is deployed and configured a Virtual Network Interface. This interface encapsulates the virtual network implementation, the virtual network can be something like a Overlay network, VLan or somthing else, that somehow connects the group of Nodes available. Each `Node` knows where other `Node`s are located via communication with the `Control Plane`. I.e., the CNI maintains a table of `Node`s, it knows how to route the traffic between the `Node`s, and how the traffic is actually transferred deesn't really matter (e.g., through some sort of UDP and packet modification, or even SSH tunneling; Flannel configures a layer 3 IPv4 overlay network; Calico configures a BGP to route packets; Weave configures a Mesh Overlay Network). CNI installed a virtual network interface on the Kernel, and `kube-proxy` maintains the set of rules used to route the traffic to that virtual network interface. The overall model is clean and well encapsulated.
+
+The below examples are some of the IPTable rules maintained by `kube-proxy` (by contacting the **Control Plane**, the `kube-proxy` knows when a `Node` is joined to or removed from the cluster). The output is retrieved from the Node. Notice that with Minikube, the Kubernetes is actually deployed as a Container ( Container inside another Container :D ).
+
+Some exmaples of `kube-proxy` maintained Pre-Routing Rules:
+
+```sh
+iptables -t nat -nvL PREROUTING
+# Chain PREROUTING (policy ACCEPT 9 packets, 540 bytes)
+#  pkts bytes target     prot opt in     out     source               destination
+#    22  1419 KUBE-SERVICES  all  --  *      *       0.0.0.0/0            0.0.0.0/0            /* kubernetes service portals */
+#     3   235 DOCKER_OUTPUT  all  --  *      *       0.0.0.0/0            192.168.65.2
+#    22  1320 DOCKER     all  --  *      *       0.0.0.0/0            0.0.0.0/0            ADDRTYPE match dst-type LOCAL
+#    10   600 CNI-HOSTPORT-DNAT  all  --  *      *       0.0.0.0/0            0.0.0.0/0            ADDRTYPE match dst-type LOCAL
+```
+
+Some exmaples of `kube-proxy` maintained Service Routing Chain:
+
+```sh
+iptables -t nat -nvL KUBE-SERVICES
+# Chain KUBE-SERVICES (2 references)
+#  pkts bytes target     prot opt in     out     source               destination
+#     1    60 KUBE-SVC-XHWOAZAUK25GZQ4W  tcp  --  *      *       0.0.0.0/0            10.100.154.189       /* default/empty-mind cluster IP */ tcp dpt:8081
+#     2   120 KUBE-SVC-NPX46M4PTMTKRN6Y  tcp  --  *      *       0.0.0.0/0            10.96.0.1            /* default/kubernetes:https cluster IP */ tcp dpt:443
+#     0     0 KUBE-SVC-CG5I4G2RS3ZVWGLK  tcp  --  *      *       0.0.0.0/0            10.110.72.144        /* ingress-nginx/ingress-nginx-controller:http cluster IP */ tcp dpt:80
+#     0     0 KUBE-SVC-EDNDUDH2C75GIR6O  tcp  --  *      *       0.0.0.0/0            10.110.72.144        /* ingress-nginx/ingress-nginx-controller:https cluster IP */ tcp dpt:443
+#     0     0 KUBE-SVC-EZYNCFY2F7N6OQA2  tcp  --  *      *       0.0.0.0/0            10.109.90.144        /* ingress-nginx/ingress-nginx-controller-admission:https-webhook cluster IP */ tcp dpt:443
+#     0     0 KUBE-SVC-ERIFXISQEP7F7OF4  tcp  --  *      *       0.0.0.0/0            10.96.0.10           /* kube-system/kube-dns:dns-tcp cluster IP */ tcp dpt:53
+#     0     0 KUBE-SVC-JD5MR3NA4I4DYORP  tcp  --  *      *       0.0.0.0/0            10.96.0.10           /* kube-system/kube-dns:metrics cluster IP */ tcp dpt:9153
+#     2   164 KUBE-SVC-TCOU7JCQXEZGVUNU  udp  --  *      *       0.0.0.0/0            10.96.0.10           /* kube-system/kube-dns:dns cluster IP */ udp dpt:53
+#     0     0 KUBE-SVC-Z6GDYMWE5TV2NNJN  tcp  --  *      *       0.0.0.0/0            10.105.19.84         /* kubernetes-dashboard/dashboard-metrics-scraper cluster IP */ tcp dpt:8000
+#     0     0 KUBE-SVC-CEZPIJSAUFW5MYPQ  tcp  --  *      *       0.0.0.0/0            10.96.89.154         /* kubernetes-dashboard/kubernetes-dashboard cluster IP */ tcp dpt:80
+#  2615  157K KUBE-NODEPORTS  all  --  *      *       0.0.0.0/0            0.0.0.0/0            /* kubernetes service nodeports; NOTE: this must be the last rule in this chain */ ADDRTYPE match dst-type LOCAL
+```
+
+Kubernetes Services ClusterIPs:
+
+```sh
+kubectl get svc -o wide
+# NAME         TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)    AGE    SELECTOR
+# empty-mind   ClusterIP   10.100.154.189   <none>        8081/TCP   4d3h   app=empty-mind
+# kubernetes   ClusterIP   10.96.0.1        <none>        443/TCP    11d    <none>
+```
+
+The route matches chain `KUBE-SVC-XHWOAZAUK25GZQ4W` based on the Cluster IP (`10.100.154.189`).
+
+```sh
+iptables -t nat -nvL KUBE-SVC-XHWOAZAUK25GZQ4W
+# Chain KUBE-SVC-XHWOAZAUK25GZQ4W (1 references)
+#  pkts bytes target     prot opt in     out     source               destination
+#     0     0 KUBE-MARK-MASQ  tcp  --  *      *      !10.244.0.0/16        10.100.154.189       /* default/empty-mind cluster IP */ tcp dpt:8081
+#     1    60 KUBE-SEP-AFYS27EZD27BHQIB  all  --  *      *       0.0.0.0/0            0.0.0.0/0            /* default/empty-mind -> 10.244.0.96:8081 */
+```
+
+Continue following the chain:
+
+```sh
+iptables -t nat -nvL KUBE-SEP-AFYS27EZD27BHQIB
+# Chain KUBE-SEP-AFYS27EZD27BHQIB (1 references)
+#  pkts bytes target     prot opt in     out     source               destination
+#     0     0 KUBE-MARK-MASQ  all  --  *      *       10.244.0.96          0.0.0.0/0            /* default/empty-mind */
+#     1    60 DNAT       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            /* default/empty-mind */ tcp to:10.244.0.96:8081
+```
+
+Finally the packet is routed to `10.244.0.96`, which is understood and handled by the CNI plugin.
