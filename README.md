@@ -1749,9 +1749,19 @@ spec:
   externalName: my.database.example.com
 ```
 
-### Ingress
+Say, we have a MySQL instance deployed outside of the cluster, we want the Pods deployed within the cluster to connect it using the domain name `mysql`. We can have the follwing service setup, where the domain name `mysql` is actually pointed to another domain called `dummy.com`. Then, inside the cluster, we connect it by the url `dummy.com:3306`.
 
-***Ingress Addons doesn't work on MacOS, use --driver=hyperkit will fix it***
+```yaml
+kind: Service
+apiVersion: v1
+metadata:
+  name: mq
+spec:
+  type: "ExternalName"
+  externalName: "dummy.com"
+```
+
+### Ingress
 
 - https://kubernetes.io/docs/concepts/services-networking/ingress-controllers/
 - https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#spec-and-status
@@ -1955,8 +1965,6 @@ All traffic to `foo.bar.com` is routed to `service`, and all traffic to `bar.foo
 
 #### TLS For Ingress
 
-<!-- TODO: learn more about this later -->
-
 Ingress can be secured by specifying a TLS private key and certificate. By default, Ingress assumes that the TLS terminates at Ingress.
 
 ```yaml
@@ -1981,7 +1989,7 @@ metadata:
 spec:
   tls:
   - hosts:
-      - https-example.foo.com
+    - https-example.foo.com
     secretName: testsecret-tls
   rules:
   - host: https-example.foo.com
@@ -1994,6 +2002,62 @@ spec:
             name: service1
             port:
               number: 80
+```
+
+For example:
+
+```sh
+# generate certificate
+openssl req -x509 -sha256 -nodes -days 365 -newkey rsa:2048 -keyout tls.key -out tls.crt -subj "/CN=dummy.com/O=dummy.com"
+
+kubectl create secret tls tls-secret --key tls.key --cert tls.crt
+# secret/tls-secret created
+
+kubectl get secret
+# NAME         TYPE                DATA   AGE
+# tls-secret   kubernetes.io/tls   2      9s
+
+kubectl describe secret tls-secret
+# Name:         tls-secret
+# Namespace:    default
+# Labels:       <none>
+# Annotations:  <none>
+
+# Type:  kubernetes.io/tls
+
+# Data
+# ====
+# tls.crt:  1029 bytes
+# tls.key:  1704 bytes
+```
+
+Then we have a secret created named "tls-secret". Inside Ingress, we update `spec.tls.secretName` to "tls-secret" as follows:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nice-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: dummy.com
+    http:
+      paths:
+      - pathType: Prefix
+        path: /(.*)
+        backend:
+          service:
+            name: empty-mind
+            port:
+              number: 8081
+  tls:
+  - hosts:
+    - dummy.com
+    secretName: tls-secret
 ```
 
 ### Ingress Nginx
