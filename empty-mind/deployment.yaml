@@ -22,5 +22,15 @@ spec:
         name: empty-mind
         resources: {}
         imagePullPolicy: Never
-
-status: {}
+        volumeMounts:
+        - name: mymyconf
+          mountPath: /etc/data
+        - name: empty-mind-conf
+          mountPath: /etc/conf
+      volumes:
+      - name: mymyconf
+        configMap:
+          name: myconf
+      - name: empty-mind-conf
+        configMap:
+          name: empty-mind-conf

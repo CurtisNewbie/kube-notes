@@ -2301,6 +2301,267 @@ The entities that a Pod can communicate with are identified through a combinatio
 
 Each Network Policy can specify a set of Ingress Rules or a set of Egress Rules, the rules are specified for CIDR blocks and ports.
 
+### Services and Pods DNS
+
+***"Kubernetes publishes information about Pods and Services which is used to program DNS. Kubelet configures Pods' DNS so that running containers can lookup Services by name rather than IP."***
+
+### Volumes
+
+There are two types of Volumes:
+
+- Ephemeral Volumes
+- Persisten Volumes
+
+### ConfigMap Volume
+
+- https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/
+
+`ConfigMap` is a kind of Volume that can be mounted to a Pod by providing the name of the `ConfigMap`, the items (identified by key) of the `ConfigMap` must al be specified, all the content under `items.key` name will then be accessible via the path specified in the valumn.
+
+E.g.,
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: configmap-pod
+spec:
+  containers:
+    - name: test
+      image: busybox:1.28
+      volumeMounts:
+        - name: config-vol
+          mountPath: /etc/config
+  volumes:
+    - name: config-vol
+      configMap:
+        name: log-config
+        items:
+          - key: log_level
+            path: log_level
+```
+
+In the example above, all the content stored in `log_level` entry mounted and accessible at path `/etc/config/log_level`. `/etc/config` is derived from `volumnMounts.mountPath`, and `/log_level`  is derived from `volumns.configMap.items.path`.
+
+A `ConfigMap` can be created from directories, files, or literal values
+
+- `kubectl create configmap CONFIGMAP_NAME --from-file=...`
+- `kubectl create configmap CONFIGMAP_NAME --from-file=key1=... --from-file=key2=...`
+- `kubectl create configmap CONFIGMAP_NAME --from-literal=key1=config1 --from-literal=key2=config2`
+- `kubectl create configmap CONFIGMAP_NAME --from-env-file=path/to/foo.env --from-env-file=path/to/bar.env `
+
+```sh
+kubectl create configmap myconf --from-file=demo.html
+# configmap/myconf created
+
+kubectl get configmap
+# NAME               DATA   AGE
+# kube-root-ca.crt   1      2d2h
+# myconf             1      4s
+
+kubectl get configmap/myconf
+# NAME     DATA   AGE
+# myconf   1      9s
+
+kubectl describe configmap/myconf
+# Name:         myconf
+# Namespace:    default
+# Labels:       <none>
+# Annotations:  <none>
+
+# Data
+# ====
+# demo.html:
+# ----
+# <html>
+
+# <body>
+#     <video controls>
+#         <source src="http://localhost:8084/file/stream?key=0fR1H1O0t8xQZjPzbGz4lRx%2FbPacIg" type="video/mp4">
+#         Yo something is wrong
+#     </video>
+# </body>
+
+# </html>
+
+# BinaryData
+# ====
+
+# Events:  <none>
+```
+
+Then, we can mount the `ConfigMap` in `Deployment` as follows:
+
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: empty-mind
+  name: empty-mind
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: empty-mind
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: empty-mind
+    spec:
+      containers:
+      - image: docker.io/library/empty-mind:latest
+        name: empty-mind
+        resources: {}
+        imagePullPolicy: Never
+        volumeMounts:
+        - name: mymyconf
+          mountPath: /etc/data
+      volumes:
+      - name: mymyconf
+        configMap:
+          name: myconf
+```
+
+Inside the Pod, the file `demo.html` is actually accessible at `/etc/data/demo.html`.
+
+We can also create `ConfigMap` based on key-value properties.
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  namespace: default
+  name: empty-mind-conf
+data:
+  myname: 'shady'
+  age: "100"
+```
+
+The way we access these two properties will still be in forms of reading files:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  creationTimestamp: null
+  labels:
+    app: empty-mind
+  name: empty-mind
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: empty-mind
+  strategy: {}
+  template:
+    metadata:
+      creationTimestamp: null
+      labels:
+        app: empty-mind
+    spec:
+      containers:
+      - image: docker.io/library/empty-mind:latest
+        name: empty-mind
+        resources: {}
+        imagePullPolicy: Never
+        volumeMounts:
+        - name: empty-mind-conf
+          mountPath: /etc/conf
+      volumes:
+      - name: empty-mind-conf
+        configMap:
+          name: empty-mind-conf
+```
+
+There will be two files under `/etc/conf`, the content of the file will be the property value.
+
+- `/etc/conf`
+  - `age`
+  - `myname`
+
+If we want to create configMap based on content of a file, but with different name:
+
+```sh
+kubectl create configmap myconf2 --from-file=website.html=demo.html
+```
+
+From literal values:
+
+```sh
+kubectl create configmap literalconf --from-literal=special.how=very --from-literal=special.type=charm
+```
+
+We can also retrieve key-value pairs from `ConfigMap` and inject these data into container in forms of ENV:
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: special-config
+  namespace: default
+data:
+  special.how: very
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: env-config
+  namespace: default
+data:
+  log_level: INFO
+```
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dapi-test-pod
+spec:
+  containers:
+    - name: test-container
+      image: registry.k8s.io/busybox
+      command: [ "/bin/sh", "-c", "env" ]
+      env:
+        - name: SPECIAL_LEVEL_KEY
+          valueFrom:
+            configMapKeyRef:
+              name: special-config # ConfigMap's name
+              key: special.how     # key in ConfigMap
+        - name: LOG_LEVEL
+          valueFrom:
+            configMapKeyRef:
+              name: env-config
+              key: log_level
+  restartPolicy: Never
+```
+
+### EmptyDir Volume
+
+`EmptyDir` Volume is a kind of ephemeral volume, the dir is shared among the containers, and is deleted when the Pod is deleted.
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: test-pd
+spec:
+  containers:
+  - image: registry.k8s.io/test-webserver
+    name: test-container
+    volumeMounts:
+    - mountPath: /cache
+      name: cache-volume
+  volumes:
+  - name: cache-volume
+    emptyDir:
+      sizeLimit: 500Mi
+```
+
 ## Local Docker Registry
 
 - https://docs.docker.com/registry/deploying/
