@@ -2,6 +2,7 @@
 
 Notes for kubernetes
 
+- https://www.weave.works/blog/kubernetes-node-everything-you-need-to-know
 - Cracking Kubernetes Node Proxy: https://arthurchiao.art/blog/cracking-k8s-node-proxy/
 - Google Kubernets Engine - Network Overview: https://cloud.google.com/kubernetes-engine/docs/concepts/network-overview
 - Kubernetes Secure Internal Networking: https://medium.com/google-cloud/secure-kubernetes-internal-networking-5f2556f7efde
@@ -2224,4 +2225,48 @@ iptables -t nat -nvL KUBE-SEP-AFYS27EZD27BHQIB
 
 Finally the packet is routed to `10.244.0.96`, which is understood and handled by the CNI plugin.
 
+
+## Local Docker Registry
+
+- https://docs.docker.com/registry/deploying/
+- https://www.australtech.net/running-a-local-docker-registry/
+
+```sh
+docker run -d -p 5000:5000 --restart=always --name registry registry:2
+```
+
+Examples of using the local Docker Registry (without any sort of protection).
+
+```sh
+docker tag mega-head:v0.0.1 192.168.2.24:5000/mega-head:v0.0.1
+
+docker push 192.168.2.24:5000/mega-head:v0.0.1
+```
+
+If the following error is shown, the `insecure-registries` in Docker client should be configured (because the registry doesn't have any TLS certificate setup yet):
+
+```
+The push refers to repository [192.168.2.24:5000/mega-head]
+Get "https://192.168.2.24:5000/v2/": http: server gave HTTP response to HTTPS client
+```
+
+Configure the `insecure-registries`:
+
+```json
+{
+  "insecure-registries": ["192.168.2.24:5000"]
+}
+```
+
+The Docker Registry provides various endpoints:
+
+- https://www.baeldung.com/ops/docker-registry-api-list-images-tags
+
+```sh
+# list images available (with pagination using query param `n=&last=`, or use the link in the response header)
+curl http://192.168.2.24:5000/v2/_catalog -m 2 -v
+
+# list all tags available for empty-mind
+curl http://localhost:5000/v2/empty-mind/tags/list -v -m 2
+```
 

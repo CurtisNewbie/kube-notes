@@ -8,6 +8,7 @@ import (
 	"github.com/curtisnewbie/gocommon/common"
 	"github.com/curtisnewbie/gocommon/server"
 	"github.com/gin-gonic/gin"
+	"github.com/sirupsen/logrus"
 )
 
 func main() {
@@ -15,9 +16,9 @@ func main() {
 	server.ConfigureLogging()
 
 	server.RawGet("/ping", func(ctx *gin.Context) {
+		logrus.Infof("Received ping from '%v'", ctx.RemoteIP())
 		ctx.Data(200, "text/plain", []byte(fmt.Sprintf("pong at %s\n", time.Now())))
 	})
 
 	server.BootstrapServer()
 }
-

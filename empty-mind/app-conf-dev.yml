@@ -1,4 +1,5 @@
 app.name: "empty-mind"
+mode.production: true
 
 server:
   host: "0.0.0.0"
