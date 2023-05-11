@@ -2,7 +2,8 @@
 
 Notes for kubernetes
 
-- https://www.weave.works/blog/kubernetes-node-everything-you-need-to-know
+- CIDR: https://aws.amazon.com/cn/what-is/cidr/#:~:text=Classless%20Inter%2DDomain%20Routing%20(CIDR)%20allows%20network%20routers%20to,specified%20by%20the%20CIDR%20suffix.
+- Everything you need to know about Nodes: https://www.weave.works/blog/kubernetes-node-everything-you-need-to-know
 - Cracking Kubernetes Node Proxy: https://arthurchiao.art/blog/cracking-k8s-node-proxy/
 - Google Kubernets Engine - Network Overview: https://cloud.google.com/kubernetes-engine/docs/concepts/network-overview
 - Kubernetes Secure Internal Networking: https://medium.com/google-cloud/secure-kubernetes-internal-networking-5f2556f7efde
@@ -2225,6 +2226,80 @@ iptables -t nat -nvL KUBE-SEP-AFYS27EZD27BHQIB
 
 Finally the packet is routed to `10.244.0.96`, which is understood and handled by the CNI plugin.
 
+### EndpointSlices (& Endpoints)
+
+- https://kubernetes.io/docs/concepts/services-networking/endpoint-slices/
+- https://nigelpoulton.com/kubernetes-endpoint-slices-explained/
+
+`EndpointSlices` (v1.21 stable) & `Endpoints` *'provides a way to track network endpoints within a Kubernetes cluster'*, they contains a set of network endpoints identified by a protocol, address and port. Notice that both `EndpointSlices` and `Endpoints` are plural, since a single object will manage one or more endpoints.
+
+`Endpoints` and `EndpointSlices` are also how the `Service` is implemented behind the scene. Say, a `Service` is created for `Pod`s with name `'empty-mind'` (via `Selector`). If there are `N`l Pods, there will be `N` network endpoints managed by the `Service` object. Behind the `Service` object, there is actually one or more `Endpoints`(s) or `EndpointSlices`(s) objects managing these endpoints.
+
+The major difference between `EndpointSlices` and `Endpoints` is that `EndpointSlices` only manages 100 endpoints (can be configured up to 1000). There can be multiple `EndpointSlices` objects created for a Service, each containing some network endpoints. When a Pod is added or deleted, the endpoints managed must be updated (e.g., remove the network address of a Pod that is deleted); such change is triggered by Control Plane, and is observed by all the Nodes (the `kube-proxy`). With `Endpoints`, the entire object is updated and resent to all the Nodes. However, with `EndpointSlices`, only the one with the endpoint added/removed is updated (assuming a `Pod` is deleted, only the `EndpointSlices` with the `Pod` address is updated).
+
+Below is an example of `EndpointSlices` created by a `Service`:
+
+```sh
+kubectl describe endpointslices/empty-mind-zrxfh -n default
+# Name:         empty-mind-zrxfh
+# Namespace:    default
+# Labels:       endpointslice.kubernetes.io/managed-by=endpointslice-controller.k8s.io
+#               kubernetes.io/service-name=empty-mind
+# Annotations:  <none>
+# AddressType:  IPv4
+# Ports:
+#   Name     Port  Protocol
+#   ----     ----  --------
+#   <unset>  8081  TCP
+# Endpoints:
+#   - Addresses:  10.244.2.41
+#     Conditions:
+#       Ready:    true
+#     Hostname:   <unset>
+#     TargetRef:  Pod/empty-mind-649f99968c-nh9pf
+#     Topology:   kubernetes.io/hostname=worker2
+# Events:         <none>
+```
+
+If a `Pod` doesn't have any sort of `Service` created for it, then it may not even have a `EndpointSlice` at all. The `EndpointSlice` can be created manually tho.
+
+E.g.,
+
+```yaml
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: example-abc
+  labels:
+    kubernetes.io/service-name: example
+addressType: IPv4
+ports:
+  - name: http
+    protocol: TCP
+    port: 80
+endpoints:
+  - addresses:
+      - "10.1.2.3"
+    conditions:
+      ready: true
+    hostname: pod-1
+    nodeName: node-1
+    zone: us-west2-a
+```
+
+### Network Policies
+
+- https://kubernetes.io/docs/concepts/services-networking/network-policies/
+
+NetworkPolicies are an application-centric construct which allow you to specify how a pod is allowed to communicate with various network "entities".
+
+The entities that a Pod can communicate with are identified through a combination of the following 3 identifiers:
+
+- Other pods that are allowed (exception: a pod cannot block access to itself).
+- Namespaces that are allowed.
+- IP blocks (exception: traffic to and from the node where a Pod is running is always allowed, regardless of the IP address of the Pod or the node).
+
+Each Network Policy can specify a set of Ingress Rules or a set of Egress Rules, the rules are specified for CIDR blocks and ports.
 
 ## Local Docker Registry
 
