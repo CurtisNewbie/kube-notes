@@ -11,7 +11,6 @@ Notes for kubernetes
 - Goffinet.org About Containers and Kubernetes: https://containers.goffinet.org/containers/001-intro.html#introduction
 - Minikube vs Kind vs k3s: https://shipit.dev/posts/minikube-vs-kind-vs-k3s.html
 - Minikube Tutorial: https://minikube.sigs.k8s.io/docs/start/
-- Kubernetes Doc:
 - Kubectl Cheat Sheet: https://kubernetes.io/docs/reference/kubectl/cheatsheet/#bash
 - Nginx Ingress Controller: https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/
 - Ingress nginx for TCP and UDP services (Minikube): https://minikube.sigs.k8s.io/docs/tutorials/nginx_tcp_udp_ingress/
@@ -2537,6 +2536,7 @@ spec:
             configMapKeyRef:
               name: env-config
               key: log_level
+              optional: true # mark the variable as optional
   restartPolicy: Never
 ```
 
@@ -2561,6 +2561,19 @@ spec:
     emptyDir:
       sizeLimit: 500Mi
 ```
+
+### Persistent Volumes
+
+***"A PersistentVolume (PV) is a piece of storage in the cluster that has been provisioned by an administrator or dynamically provisioned using Storage Classes."***
+
+- PV PersistemVolume
+- PVC PersistentVolumeClaim, a Claim for the PV
+
+See also ***Local Persistent Volume***: ***"...the Kubernetes scheduler understands which node a Local Persistent Volume belongs to... But with Local Persistent Volumes, the Kubernetes scheduler ensures that a pod using a Local Persistent Volume is always scheduled to the same node."*** (for simple use case) :D
+
+### Secret
+
+`Secret` volume is used for passing sensitive information, a more *'secure'* alternative to `ConfigMap`, the `Secret` volume is backed by `tmpfs` (RAM-backed).
 
 ## Local Docker Registry
 
