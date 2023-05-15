@@ -2311,6 +2311,131 @@ There are two types of Volumes:
 - Ephemeral Volumes
 - Persisten Volumes
 
+### Persistent Volume & Persistent Volume Claim
+
+- https://kubernetes.io/docs/tasks/configure-pod-container/configure-persistent-volume-storage/
+- https://loft.sh/blog/kubernetes-persistent-volumes-examples-and-best-practices/
+
+Persistent Volume has following fields for configuration:
+
+- `spec.capacity.storage`
+  - Capacity of the storage requested
+- `spec.volumeMode`
+  - Volume Mode, available options include `Filesystem` and `Block`; `Filesystem` is the default one,
+    which simply mounts the volume into Pods as a directory. `Block` mounts the volume as a **raw block** device;
+    the Pod must know how to access it without any FS deployed as the intermediate layer, it's usually used to
+    maximize IO performance.
+- `spec.accessModes`
+  - Access Mode, available options include `ReadWriteOnce`, `ReadOnlyMany`, `ReadWriteMany`; it specifies how a PV
+    can be mounted and accessed, e.g., some VP plugins support multiple read/write clients, while others don't.
+    `ReadWriteOnce RWO` specifies that the volume can be mounted as read-write by a single node (or multiple
+    pods running on that node). `ReadOnlyMany ROM` specifies that the volume can be mounted as read-only by many
+    nodes. `ReadWriteMany RWM` specifies that the volume can be mounted as read-write by many nodes.
+- `spec.storageClassName`
+  - Storage Class (name of a StorageClass object), specifies the class the PV belongs to. It's optional, and it may
+    be used by PVC to selct eligible volumes (and possibly nodes).
+- `spec.persistentVolumeReclaimPolicy`
+  - Reclaim Policy (only NFS, HostPath supports recycling)
+- `spec.mountOptions`
+  - Each PV supplier specifies different sorts of mountOptions
+- `spec.nodeAffinity`
+  - Node Affinity, most PV suppliers automatically populate this property. This is needed for `local` type volumes,
+    so that the Pods are scheduled to the Nodes that match the affinity requirements.
+  - `spec.nodeAffinity.required` (NodeSelector)
+    - `spec.nodeAffinity.required.nodeSelectorTerms`
+      - `spec.nodeAffinity.required.nodeSelectorTerms.matchExpressions`
+      - `spec.nodeAffinity.required.nodeSelectorTerms.matchFields`
+- Phase
+  - A Volume may be one the following phases:
+    - `Available`: not yet bound to a claim
+    - `Bound`: volume bound to a claim
+    - `Released`: claim deleted and not yet reclaimed by the cluster
+    - `Failed`: failed for reclamation
+
+**PersistentVolumeClaims:**
+
+***"Pods access storage by using the claim as a volume. Claims must exist in the same namespace as the Pod using the claim. The cluster finds the claim in the Pod's namespace and uses it to get the PersistentVolume backing the claim."*** Think of the PV being managed by cluster administrator, and the PVC being managed by developers.
+
+Example of PV:
+
+E.g., Create a `local` PV with name `mypv`, the requested storage is 10Mi, the volumeMode is the default `Filesystem`, and the `accessModes` is `ReadWriteOnce` meaning that only one node can read-write the volume. The PV also selects nodes with `hostname` in (`example-node`). The volume will be deleted when the cluster reclaim it.
+
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mypv
+spec:
+  capacity:
+    storage: 10Mi
+  volumeMode: Filesystem
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: local-storage
+  local:
+    path: /mnt/disks/ssd1
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - example-node
+```
+
+Example to declare a PersistentVolumeClaims (PVC):
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: myclaim
+spec:
+  accessModes:
+    - ReadWriteOnce
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 1Mi
+  storageClassName: local-storage
+  selector:
+    matchLabels:
+      release: "stable"
+    matchExpressions:
+      - {key: environment, operator: In, values: [dev]}
+```
+
+Declare PVC in Deployment for the Pods to use it:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: volumes-example-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: demo
+  template: # PodTemplateSpec
+    metadata:
+      labels:
+        app: demo
+    spec: # PodSpec
+      containers:
+      - name: test-container
+        image: us-docker.pkg.dev/google-samples/containers/gke/hello-app:1.0
+        volumeMounts:
+        - mountPath: /cache
+          name: cache-volume
+      volumes: # Volume
+        - name: cache-volume
+          persistentVolumeClaim: # Persistent Volume Claim
+            claimName: myclaim
+```
+
 ### ConfigMap Volume
 
 - https://kubernetes.io/docs/tasks/configure-pod-container/configure-pod-configmap/
