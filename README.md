@@ -2,6 +2,11 @@
 
 Notes for kubernetes
 
+- Containerd: https://github.com/containerd/containerd
+- Redhat - Intro to CGRoups: https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/6/html/resource_management_guide/ch01
+- CGroups: https://man7.org/linux/man-pages/man7/cgroups.7.html
+- Linux Veth: https://man7.org/linux/man-pages/man4/veth.4.html#:~:text=The%20veth%20devices%20are%20virtual,used%20as%20standalone%20network%20devices.
+- Veth Pair: https://www.packetcoders.io/virtual-networking-devices-tun-tap-and-veth-pairs-explained/#:~:text=Veth%20devices%20are%20built%20as,OVS%20bridges%20and%20LXC%20containers.
 - CIDR: https://aws.amazon.com/cn/what-is/cidr/#:~:text=Classless%20Inter%2DDomain%20Routing%20(CIDR)%20allows%20network%20routers%20to,specified%20by%20the%20CIDR%20suffix.
 - Everything you need to know about Nodes: https://www.weave.works/blog/kubernetes-node-everything-you-need-to-know
 - Cracking Kubernetes Node Proxy: https://arthurchiao.art/blog/cracking-k8s-node-proxy/
@@ -2087,10 +2092,6 @@ spec:
               number: 8081
 ```
 
-The Ingress resource
-
-TODO
-
 ### Kube-proxy, CNI and The Overall Network Model
 
 - https://diego.assencio.com/?index=d71346b8737ee449bb09496784c9b344
@@ -2306,10 +2307,11 @@ Each Network Policy can specify a set of Ingress Rules or a set of Egress Rules,
 
 ### Volumes
 
-There are two types of Volumes:
+There are a few types of Volumes (classification):
 
 - Ephemeral Volumes
-- Persisten Volumes
+- Persistent Volumes
+- Projected Volumes
 
 ### Persistent Volume & Persistent Volume Claim
 
@@ -2744,3 +2746,134 @@ curl http://192.168.2.24:5000/v2/_catalog -m 2 -v
 curl http://localhost:5000/v2/empty-mind/tags/list -v -m 2
 ```
 
+## Namespaces and CGroups
+
+- Redhat - Intro to CGRoups: https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/6/html/resource_management_guide/ch01
+- CGroups: https://man7.org/linux/man-pages/man7/cgroups.7.html
+- https://stackoverflow.com/questions/62727781/does-kubernetes-pod-have-namespace-and-cgroup-associated-with-it
+
+Notice that in Docker (as well as in Kubernetes), containerization is mainly achieved using `namespaces` and `cgroups`, both of them are Linux kernel-level features. With namespaces, networks between the containers and the host is isolated. `Veth` pairs is a kernel-level functionality that is used to create a bridge networks between two subnets, it can also create bridge network between two networks in different network namespaces.
+
+In Mac OS, these features are not available, so the Docker Desktop has to create a VM in order to run Docker.
+
+According to the manual, ***"A cgroup is a collection of processes that are bound to a set of limits or parameters defined via the cgroup filesystem."***.
+
+***"A subsystem is a kernel component that modifies the behavior of the processes in a cgroup.  Various subsystems have been implemented, making it possible to do things such as limiting the amount of CPU time and memory available to a cgroup, accounting for the CPU time used by a cgroup, and freezing and resuming execution of the processes in a cgroup.  Subsystems are sometimes also known as resource controllers (or simply, controllers)."***
+
+(***Read the cgroup manual!!!***)
+
+Cgroup information can be retrieved from `/sys/fs/cgroup/`, the cgroups are mounted as files. In the following example, we are listing cgroups for CPU, and we can notice a file named `kubepods.slice`, this is created by Kubernetes. Recall that the Kubernetes also manages Pods' resource limit based on different set of rules. Inside `/sys/fs/cgroup/cpu/kubepods.slice/` (the CPU subsystem), we notice the two slices, one for Best-Effort class Pods and one for Burstable class Pods. Inside the two directories, there are cgroups for different Pods.
+
+In Docker, every container gets its own cgroup, however, in Kubernetes, every containers in the same pod shares the same cgroup namepspace (`cgroup`). If a pod contains multiple containers, the `net` and `ipc` namespaces of these containers will be the same.
+
+```sh
+ll /sys/fs/cgroup/cpu/
+
+# total 0
+# -rw-r--r--   1 root root 0 Jan  4 23:41 cgroup.clone_children
+# --w--w--w-   1 root root 0 Jan  4 23:41 cgroup.event_control
+# -rw-r--r--   1 root root 0 Jan  4 23:41 cgroup.procs
+# -r--r--r--   1 root root 0 Jan  4 23:41 cgroup.sane_behavior
+# -r--r--r--   1 root root 0 Jan  4 23:41 cpuacct.stat
+# -rw-r--r--   1 root root 0 Jan  4 23:41 cpuacct.usage
+# -r--r--r--   1 root root 0 Jan  4 23:41 cpuacct.usage_percpu
+# -rw-r--r--   1 root root 0 Jan  4 23:41 cpu.cfs_period_us
+# -rw-r--r--   1 root root 0 Jan  4 23:41 cpu.cfs_quota_us
+# -rw-r--r--   1 root root 0 Jan  4 23:41 cpu.rt_period_us
+# -rw-r--r--   1 root root 0 Jan  4 23:41 cpu.rt_runtime_us
+# -rw-r--r--   1 root root 0 Jan  4 23:41 cpu.shares
+# -r--r--r--   1 root root 0 Jan  4 23:41 cpu.stat
+# drwxr-xr-x   4 root root 0 Apr 13 14:47 kubepods.slice
+# -rw-r--r--   1 root root 0 Jan  4 23:41 notify_on_release
+# -rw-r--r--   1 root root 0 Jan  4 23:41 release_agent
+# drwxr-xr-x 127 root root 0 May 16 00:00 system.slice
+# -rw-r--r--   1 root root 0 Jan  4 23:41 tasks
+# drwxr-xr-x   2 root root 0 Apr 13 14:18 user.slice
+
+ll /sys/fs/cgroup/cpu/kubepods.slice/
+# total 0
+# -rw-r--r--  1 root root 0 Apr 13 14:47 cgroup.clone_children
+# --w--w--w-  1 root root 0 Apr 13 14:47 cgroup.event_control
+# -rw-r--r--  1 root root 0 Apr 13 14:47 cgroup.procs
+# -r--r--r--  1 root root 0 Apr 13 14:47 cpuacct.stat
+# -rw-r--r--  1 root root 0 Apr 13 14:47 cpuacct.usage
+# -r--r--r--  1 root root 0 Apr 13 14:47 cpuacct.usage_percpu
+# -rw-r--r--  1 root root 0 Apr 13 14:47 cpu.cfs_period_us
+# -rw-r--r--  1 root root 0 Apr 13 14:47 cpu.cfs_quota_us
+# -rw-r--r--  1 root root 0 Apr 13 14:47 cpu.rt_period_us
+# -rw-r--r--  1 root root 0 Apr 13 14:47 cpu.rt_runtime_us
+# -rw-r--r--  1 root root 0 Apr 13 14:47 cpu.shares
+# -r--r--r--  1 root root 0 Apr 13 14:47 cpu.stat
+# drwxr-xr-x 10 root root 0 May 11 13:57 kubepods-besteffort.slice
+# drwxr-xr-x  5 root root 0 May 10 17:59 kubepods-burstable.slice
+# -rw-r--r--  1 root root 0 Apr 13 14:47 notify_on_release
+# -rw-r--r--  1 root root 0 Apr 13 14:47 tasks
+
+
+ll /sys/fs/cgroup/cpu/kubepods.slice/kubepods-burstable.slice/
+# cgroup.clone_children                                             cpu.rt_runtime_us
+# cgroup.event_control                                              cpu.shares
+# cgroup.procs                                                      cpu.stat
+# cpuacct.stat                                                      kubepods-burstable-pod2bf3e146_a7f4_4137_b932_262990ef5c1a.slice/
+# cpuacct.usage                                                     kubepods-burstable-pod2fb4e921_04c3_48b1_b563_e34b8244d762.slice/
+# cpuacct.usage_percpu                                              kubepods-burstable-pod57c35a27_0876_4ea4_8389_b3795933aee4.slice/
+# cpu.cfs_period_us                                                 notify_on_release
+# cpu.cfs_quota_us                                                  tasks
+# cpu.rt_period_us
+
+ll /sys/fs/cgroup/cpu/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod2bf3e146_a7f4_4137_b932_262990ef5c1a.slice/
+# cgroup.clone_children
+# cgroup.event_control
+# cgroup.procs
+# cpuacct.stat
+# cpuacct.usage
+# cpuacct.usage_percpu
+# cpu.cfs_period_us
+# cpu.cfs_quota_us
+# cpu.rt_period_us
+# cpu.rt_runtime_us
+# cpu.shares
+# cpu.stat
+# docker-4c0e902d6a260a3d5ddeb9fae428ce4b05efc3745d3f32a19bb338186e585139.scope/
+# docker-8854906d884b22535f2aeee0327fc3095d99d2623915282dfc192fa658802bf9.scope/
+# notify_on_release
+# tasks
+
+cat /sys/fs/cgroup/cpu/kubepods.slice/kubepods-burstable.slice/kubepods-burstable-pod2bf3e146_a7f4_4137_b932_262990ef5c1a.slice/cpu.stat
+# nr_periods 6805428
+# nr_throttled 137949
+# throttled_time 4194121522578
+
+docker ps
+# CONTAINER ID   IMAGE                           COMMAND       CREATED          STATUS          PORTS         NAMES
+# 21c3fa0ecc3f   192.168.2.24:5000/empty-mind    "./main"      5 days ago       Up 5 days                     k8s_empty-mind_empty-mind-649f99968c-nh9pf_default_8d9d843c-e3da-447b-a309-8dbbf8c781a1_0
+# ...
+
+
+docker top 21c3fa0ecc3f
+# UID                 PID                 PPID                C                   STIME               TTY                 TIME                CMD
+# root                24364               25051               0                   10:19               pts/0               00:00:00            /bin/sh
+# root                25072               25051               0                   5月11               ?                   00:00:54            ./main
+
+cat /proc/25072/cgroup
+# 11:memory:/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod8d9d843c_e3da_447b_a309_8dbbf8c781a1.slice/docker-21c3fa0ecc3f73197434e750f82dae56ef0359491360bc5b1c411f23de403728.scope
+# 10:pids:/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod8d9d843c_e3da_447b_a309_8dbbf8c781a1.slice/docker-21c3fa0ecc3f73197434e750f82dae56ef0359491360bc5b1c411f23de403728.scope
+# 9:freezer:/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod8d9d843c_e3da_447b_a309_8dbbf8c781a1.slice/docker-21c3fa0ecc3f73197434e750f82dae56ef0359491360bc5b1c411f23de403728.scope
+# 8:cpuset:/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod8d9d843c_e3da_447b_a309_8dbbf8c781a1.slice/docker-21c3fa0ecc3f73197434e750f82dae56ef0359491360bc5b1c411f23de403728.scope
+# 7:devices:/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod8d9d843c_e3da_447b_a309_8dbbf8c781a1.slice/docker-21c3fa0ecc3f73197434e750f82dae56ef0359491360bc5b1c411f23de403728.scope
+# 6:cpuacct,cpu:/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod8d9d843c_e3da_447b_a309_8dbbf8c781a1.slice/docker-21c3fa0ecc3f73197434e750f82dae56ef0359491360bc5b1c411f23de403728.scope
+# 5:hugetlb:/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod8d9d843c_e3da_447b_a309_8dbbf8c781a1.slice/docker-21c3fa0ecc3f73197434e750f82dae56ef0359491360bc5b1c411f23de403728.scope
+# 4:blkio:/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod8d9d843c_e3da_447b_a309_8dbbf8c781a1.slice/docker-21c3fa0ecc3f73197434e750f82dae56ef0359491360bc5b1c411f23de403728.scope
+# 3:perf_event:/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod8d9d843c_e3da_447b_a309_8dbbf8c781a1.slice/docker-21c3fa0ecc3f73197434e750f82dae56ef0359491360bc5b1c411f23de403728.scope
+# 2:net_prio,net_cls:/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod8d9d843c_e3da_447b_a309_8dbbf8c781a1.slice/docker-21c3fa0ecc3f73197434e750f82dae56ef0359491360bc5b1c411f23de403728.scope
+# 1:name=systemd:/kubepods.slice/kubepods-besteffort.slice/kubepods-besteffort-pod8d9d843c_e3da_447b_a309_8dbbf8c781a1.slice/docker-21c3fa0ecc3f73197434e750f82dae56ef0359491360bc5b1c411f23de403728.scope
+
+ll /proc/25072/ns
+# total 0
+# lrwxrwxrwx 1 root root 0 May 16 10:19 ipc -> ipc:[4026533149]
+# lrwxrwxrwx 1 root root 0 May 16 10:19 mnt -> mnt:[4026533228]
+# lrwxrwxrwx 1 root root 0 May 16 10:19 net -> net:[4026533152]
+# lrwxrwxrwx 1 root root 0 May 16 10:19 pid -> pid:[4026533230]
+# lrwxrwxrwx 1 root root 0 May 16 14:10 user -> user:[4026531837]
+# lrwxrwxrwx 1 root root 0 May 16 10:19 uts -> uts:[4026533229]
+```
