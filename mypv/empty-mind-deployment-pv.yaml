@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: default
+  labels:
+    app: empty-mind
+  name: empty-mind
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: empty-mind
+  template:
+    metadata:
+      labels:
+        app: empty-mind
+    spec:
+      containers:
+      - image: 192.168.2.24:5000/empty-mind:v0.0.3
+        name: empty-mind
+        resources: {}
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - mountPath: /mymnt/
+          name: mypvm
+      volumes:
+        - name: mypvm
+          persistentVolumeClaim:
+            claimName: myclaim

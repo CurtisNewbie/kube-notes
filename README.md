@@ -2309,11 +2309,18 @@ Each Network Policy can specify a set of Ingress Rules or a set of Egress Rules,
 
 There are a few types of Volumes (classification):
 
-- Ephemeral Volumes
 - Persistent Volumes
-- Projected Volumes
+- Ephemeral Volumes
+- Projected Volumes: A projected volume maps several existing volume sources into the same directory.:w
 
 ### Persistent Volume & Persistent Volume Claim
+
+***"A PersistentVolume (PV) is a piece of storage in the cluster that has been provisioned by an administrator or dynamically provisioned using Storage Classes."***
+
+- PV PersistemVolume
+- PVC PersistentVolumeClaim, a Claim for the PV
+
+See also ***Local Persistent Volume***: ***"...the Kubernetes scheduler understands which node a Local Persistent Volume belongs to... But with Local Persistent Volumes, the Kubernetes scheduler ensures that a pod using a Local Persistent Volume is always scheduled to the same node."*** (for simple use case) :D
 
 - https://kubernetes.io/docs/tasks/configure-pod-container/configure-persistent-volume-storage/
 - https://loft.sh/blog/kubernetes-persistent-volumes-examples-and-best-practices/
@@ -2436,6 +2443,194 @@ spec:
         - name: cache-volume
           persistentVolumeClaim: # Persistent Volume Claim
             claimName: myclaim
+```
+
+---
+
+### Persistent Volume & Persistent Volume Claims Demo
+
+Cluster admin declares PersistentVolume(s), developers are free to deploy Pods that use these volumes. Notice that the PersistentVolume requests storage capacity 10Mi, the PersistentVolume is only created on node with `hostname=mystorage`, and the volume will be mounted to the node's local path `/root/kube-demo/vol`.
+
+```yaml
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mypv
+  labels:
+    name: mypv
+spec:
+  capacity:
+    storage: 10Mi
+  volumeMode: Filesystem
+  accessModes:
+  - ReadWriteOnce
+  local:
+    path: /root/kube-demo/vol
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - mystorage
+```
+
+```sh
+kubectl apply -f pv.yaml
+# persistentvolume/mypv configured
+
+kubectl get persistentvolume
+NAME   CAPACITY   ACCESS MODES   RECLAIM POLICY   STATUS   CLAIM             STORAGECLASS   REASON   AGE
+mypv   10Mi       RWO            Retain           Bound    default/myclaim                           40m
+
+kubectl describe persistentvolume/mypv
+# Name:              mypv
+# Labels:            name=mypv
+# Annotations:       pv.kubernetes.io/bound-by-controller: yes
+# Finalizers:        [kubernetes.io/pv-protection]
+# StorageClass:
+# Status:            Bound
+# Claim:             default/myclaim
+# Reclaim Policy:    Retain
+# Access Modes:      RWO
+# VolumeMode:        Filesystem
+# Capacity:          10Mi
+# Node Affinity:
+#   Required Terms:
+#     Term 0:        kubernetes.io/hostname in [worker2]
+# Message:
+# Source:
+#     Type:  LocalVolume (a persistent volume backed by local storage on a node)
+#     Path:  /root/kube-demo/vol
+# Events:    <none>
+```
+
+Create the Claim for the PersistentVolume, the PVC is named `myclaim` which is referenced in Pod or Deployment object. Notice the PVC has a selector object, it refers to PersistentVolumes with label `name=mypv`. If the selector is configured incorrectly (e.g., no PV that matches the requirement), the Pods won't be able to start because the volume that the Pods claimed cannot be mounted.
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: myclaim
+spec:
+  accessModes:
+  - ReadWriteOnce
+  volumeMode: Filesystem
+  resources:
+    requests:
+      storage: 1Mi
+  selector:
+    matchLabels:
+      name: mypv
+```
+
+```sh
+kubectl apply -f pvc.yaml
+# persistentvolumeclaim/myclaim created
+
+kubectl get persistentvolumeclaims
+NAME      STATUS   VOLUME   CAPACITY   ACCESS MODES   STORAGECLASS   AGE
+myclaim   Bound    mypv     10Mi       RWO                           35m
+
+kubectl describe persistentvolumeclaim myclaim
+# Name:          myclaim
+# Namespace:     default
+# StorageClass:
+# Status:        Bound
+# Volume:        mypv
+# Labels:        <none>
+# Annotations:   pv.kubernetes.io/bind-completed: yes
+#                pv.kubernetes.io/bound-by-controller: yes
+# Finalizers:    [kubernetes.io/pvc-protection]
+# Capacity:      10Mi
+# Access Modes:  RWO
+# VolumeMode:    Filesystem
+# Mounted By:    empty-mind-76846d9f99-5z4jw
+# Events:
+#   Type    Reason         Age                 From                         Message
+#   ----    ------         ----                ----                         -------
+```
+
+Update the Deployment object to mounts the volume. Notice that in the Deployment object, we refer to the PVC rather than the PV using the `name` mentioned above. Since the `volumes` is under the `PodTemplate` object, a **Rollout** is triggered. Once the rollout finished, each Pod will have the volume mounted at `/mymnt/`.
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  namespace: default
+  labels:
+    app: empty-mind
+  name: empty-mind
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: empty-mind
+  template:
+    metadata:
+      labels:
+        app: empty-mind
+    spec:
+      containers:
+      - image: 192.168.2.24:5000/empty-mind:v0.0.3
+        name: empty-mind
+        imagePullPolicy: IfNotPresent
+        volumeMounts:
+        - mountPath: /mymnt/
+          name: mypvm
+      volumes:
+        - name: mypvm
+          persistentVolumeClaim:
+            claimName: myclaim
+```
+
+Until now, the local path `/root/kube-demo/vol` on node with hostname `mystorage` is mounted to Pods (`empty-mind`) on `/mymnt/`. If we touch a file on node, say `/root/kube-demo/vol/myfile`. Inside the Pod, we will also see the file at ``
+
+```sh
+kubectl -n default describe deployment/empty-mind
+# Name:                   empty-mind
+# Namespace:              default
+# CreationTimestamp:      Wed, 10 May 2023 16:02:24 +0800
+# Labels:                 app=empty-mind
+# Annotations:            deployment.kubernetes.io/revision: 8
+# Selector:               app=empty-mind
+# Replicas:               1 desired | 1 updated | 1 total | 1 available | 0 unavailable
+# StrategyType:           RollingUpdate
+# MinReadySeconds:        0
+# RollingUpdateStrategy:  25% max unavailable, 25% max surge
+# Pod Template:
+#   Labels:  app=empty-mind
+#   Containers:
+#    empty-mind:
+#     Image:        192.168.2.24:5000/empty-mind:v0.0.3
+#     Port:         <none>
+#     Host Port:    <none>
+#     Environment:  <none>
+#     Mounts:
+#       /mymnt/ from mypvm (rw)
+#   Volumes:
+#    mypvm:
+#     Type:       PersistentVolumeClaim (a reference to a PersistentVolumeClaim in the same namespace)
+#     ClaimName:  myclaim
+#     ReadOnly:   false
+# Conditions:
+#   Type           Status  Reason
+#   ----           ------  ------
+#   Available      True    MinimumReplicasAvailable
+#   Progressing    True    NewReplicaSetAvailable
+# OldReplicaSets:  <none>
+# NewReplicaSet:   empty-mind-76846d9f99 (1/1 replicas created)
+# Events:
+#   Type    Reason             Age   From                   Message
+#   ----    ------             ----  ----                   -------
+#   Normal  ScalingReplicaSet  24m   deployment-controller  Scaled up replica set empty-mind-76846d9f99 to 1
+#   Normal  ScalingReplicaSet  18m   deployment-controller  Scaled down replica set empty-mind-649f99968c to 0
+
+
+# >>> inside the pod <<<
+/mymnt ls
+# myfile
 ```
 
 ### ConfigMap Volume
@@ -2688,15 +2883,6 @@ spec:
     emptyDir:
       sizeLimit: 500Mi
 ```
-
-### Persistent Volumes
-
-***"A PersistentVolume (PV) is a piece of storage in the cluster that has been provisioned by an administrator or dynamically provisioned using Storage Classes."***
-
-- PV PersistemVolume
-- PVC PersistentVolumeClaim, a Claim for the PV
-
-See also ***Local Persistent Volume***: ***"...the Kubernetes scheduler understands which node a Local Persistent Volume belongs to... But with Local Persistent Volumes, the Kubernetes scheduler ensures that a pod using a Local Persistent Volume is always scheduled to the same node."*** (for simple use case) :D
 
 ### Secret
 
