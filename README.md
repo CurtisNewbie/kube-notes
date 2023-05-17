@@ -2094,6 +2094,22 @@ spec:
 
 ### Kube-proxy, CNI and The Overall Network Model
 
+- https://man7.org/linux/man-pages/man8/route.8.html
+- https://linux.die.net/man/8/iptables
+- https://www.tutorialspoint.com/what-is-the-difference-between-snat-and-dnat
+- https://barenghi.faculty.polimi.it/lib/exe/fetch.php?media=teaching:2016_firewalls_nat.pdf
+- http://www.adminsehow.com/2011/09/iptables-packet-traverse-map/
+- https://superuser.com/questions/419659/iptables-vs-route?_gl=1*10qctnw*_ga*MTg4NDgyNTE4Ny4xNjM5MDUyMjA4*_ga_S812YQPLT2*MTY4NDI5ODkwMS41Ny4xLjE2ODQyOTkxNTguMC4wLjA.
+- https://en.wikipedia.org/wiki/Netlink
+- https://networklessons.com/cisco/ccna-routing-switching-icnd1-100-105/ip-routing-explained
+- https://superuser.com/questions/1184191/what-happens-to-frame-when-it-reaches-a-switch-or-router
+- https://networkengineering.stackexchange.com/questions/65051/how-does-a-host-in-one-subnet-know-to-forward-the-packet-to-the-router-mac-when
+- https://superuser.com/questions/639941/will-packets-send-to-the-same-subnet-go-through-routers
+- https://serverfault.com/questions/49765/how-does-ipv4-subnetting-work?_gl=1*1wjg1ns*_ga*MTg4NDgyNTE4Ny4xNjM5MDUyMjA4*_ga_S812YQPLT2*MTY4NDMwMTg1MS41OC4xLjE2ODQzMDQxMzkuMC4wLjA.
+- https://en.wikipedia.org/wiki/Ethernet_frame
+- https://linux.die.net/man/8/iptables
+- https://www.orangecyberdefense.com/be/blog/vxlan-overlay#:~:text=VXLAN%20is%20a%20technique%20that%20is%20used%20in%20an%20overlay%20network.&text=The%20various%20components%20are%20connected,Center%20in%20an%20underlay%20network.
+- https://www.redhat.com/sysadmin/kubernetes-pods-communicate-nodes
 - https://diego.assencio.com/?index=d71346b8737ee449bb09496784c9b344
 - https://itnext.io/an-illustrated-guide-to-kubernetes-networking-part-1-d1ede3322727
 - https://tldp.org/HOWTO/IP-Masquerade-HOWTO/ipmasq-background2.1.html
