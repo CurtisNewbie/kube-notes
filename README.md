@@ -2094,6 +2094,13 @@ spec:
 
 ### Kube-proxy, CNI and The Overall Network Model
 
+- https://www.frozentux.net/iptables-tutorial/chunkyhtml/x1938.html
+- https://www.netfilter.org/documentation/HOWTO/NAT-HOWTO-5.html#:~:text=The%20table%20of%20NAT%20rules,NAT%2C%20as%20packets%20leave
+- https://scalingo.com/blog/iptables
+- https://kubernetes.io/docs/tutorials/services/source-ip/
+- https://dustinspecker.com/posts/iptables-how-kubernetes-services-direct-traffic-to-pods/
+- https://itnext.io/inspecting-and-understanding-service-network-dfd8c16ff2c5
+- https://www.manageengine.com/network-monitoring/tech-topics/vxlan-vs-vlan.html#:~:text=VLANs%20operate%20with%20a%2012,as%2016%20million%20administrative%20domains.
 - https://man7.org/linux/man-pages/man8/route.8.html
 - https://linux.die.net/man/8/iptables
 - https://www.tutorialspoint.com/what-is-the-difference-between-snat-and-dnat
@@ -2122,7 +2129,7 @@ spec:
 - https://www.suse.com/c/rancher_blog/comparing-kubernetes-cni-providers-flannel-calico-canal-and-weave/
 - https://cloud.google.com/kubernetes-engine/docs/concepts/gke-compare-network-models
 
-`Kube-proxy` works essentially by constantly updating the IPTable on each Node (a `DaemonSet`), with which it routes the traffic to the backend(s) hidden by virtual IPs via NAT (Network Address Translation). The same logic is almost applied in all other relavent components as well, e.g., Ingress. The NAT is achieved by a set of IPTable Rules. The routed traffic is foundamentally handled by the CNI plugin (e.g., flannel, weave and calico).
+`Kube-proxy` works essentially by constantly updating the iptables (there are actually five tables) on each Node (a `DaemonSet`), with which it *routes* the traffic to the backend(s) hidden by virtual IPs (e.g., by using SNAT, DNAT, MASQ and so on). The same logic is almost applied in all other relavent components as well, e.g., Ingress. The routed traffic is foundamentally handled by the CNI plugin (e.g., flannel, weave and calico).
 
 ```sh
 kubectl get svc
@@ -2130,28 +2137,28 @@ kubectl get svc
 # empty-mind   ClusterIP   10.100.154.189   <none>        8081/TCP   3d21h
 ```
 
-The Virtual IP assigned to `empty-mind` is `10.100.154.189`. It's not publicly accessible, since it's a virtual IP within the Cluster, it's not a real IP address assigned physically. We cannot connect to the `Node` from any machine that is itself not a `Node` using that VIP, since we don't have the `routes` configured and the virtual network connected (by CNI). Traffic to this VIP address is managed and routed by the `kube-proxy` deployed on each `Node`.
+The Virtual IP assigned to `empty-mind` is `10.100.154.189`. It's not publicly accessible, since it's a virtual IP for the Cluster, it's not a real IP address assigned physically. We cannot connect to the `Node` from any machine that is itself not a `Node` using that VIP, since we don't have the routes and rules configured and the virtual network connected (by CNI, e.g., VXLAN). Traffic to this VIP address is managed and routed by the `kube-proxy` deployed on each `Node`.
 
-Always remember that `kube-proxy` is a `Node` thing, not a `Pod` thing. So, from the `Pod`'s perspective, no NAT device is involved.  The host somehow can route traffic to where it should go. If the traffic destination is a `Service`, the DNS configuration translates the domain name to a virtual IP address, the traffic is then redirected to the `Pod` address (still a virtual IP address), which is then handled by the CNI plugin (the implementation of the network). If the traffic destination is another container within the Pod, the traffic is routed to the `Container` using `Loopback` interface.
+Always remember that `kube-proxy` is a `Node` thing, not a `Pod` thing. So, from the `Pod`'s perspective, no NAT device is involved.  The host somehow can route traffic to where it should go. If the traffic destination is a `Service`, the DNS configuration translates the domain name to a virtual IP address, the traffic is then filtered, NATed and routed to one of the `Pod`'s address for that `Service` (still a virtual IP address), which is then handled by the CNI plugin (the implementation of the network). If the traffic is between two containers within the same Pod, the traffic is routed to the `Container` using `Loopback` interface.
 
 **To describe what the CNI does:**
 
-Each Node is deployed and configured a Virtual Network Interface. This interface encapsulates the virtual network implementation, the virtual network can be something like a Overlay network, VLan or somthing else, that somehow connects the group of Nodes available. Each `Node` knows where other `Node`s are located via communication with the `Control Plane`.
+Each Node is deployed and configured one or more Virtual Network Interface. This interface encapsulates the virtual network implementation, the virtual network can be something like a Overlay network, VLan, VXLAN or somthing else, that somehow connects the group of Nodes available. Each `Node` knows where other `Node`s are located via communication with the `Control Plane` (e.g., their Node IP and MAC address).
 
 I.e., the CNI maintains a table of `Node`s, it knows how to route the traffic between the `Node`s, and how the traffic is actually transferred deesn't really matter (e.g., through some sort of UDP and packet modification, or even SSH tunneling; Flannel configures a layer 3 IPv4 overlay network; Calico configures a BGP to route packets; Weave configures a Mesh Overlay Network).
 
 CNI installed a virtual network interface on the Kernel, and `kube-proxy` maintains the set of rules used to route the traffic to that virtual network interface. Within the cluster, every Nodes manages a subnet for the Pods running on it. The overall model is clean and well encapsulated.
 
-***Kindnet is a very simple implementation of CNI (https://www.tkng.io/cni/kindnet/). This implementation only contains 6 .go files! (https://github.com/aojea/kindnet#kindnet-components)***
-
 ---
+
+***Kindnet is a very simple implementation of CNI (https://www.tkng.io/cni/kindnet/). This implementation only contains 6 .go files! (https://github.com/aojea/kindnet#kindnet-components)***
 
 #### Kindnet
 
 It basically does three things:
 
 1. Configure itself by reading the ENV variables available in Cluster (the CNI itself is also deployed on each Node, cos it's a container thing :D) or from configMap or from kubeadm; it basically includes determining the subnets, mtu or other configuration that it will be using.
-2. Periodically configure and refresh the IP Masquerading rules by modifying IP Table Masquerading Rules.
+2. Periodically configure and refresh the IP Masquerading rules by modifying IP Table Masquerading Rules (a kind of SNAT).
 3. Uses the Kubernetes API to periodically fetch addresses accessible to the list of Nodes (from Control Plane), and creates links to these Nodes by configuring Linux Netlink (available commands are: `route -n`, `netstat -rn` and `ip route`).
 
 ```sh
@@ -2166,30 +2173,47 @@ ip addr show dev bridge
 #        valid_lft forever preferred_lft forever
 ```
 
-The net link above tells that any packet sent to any IP addresses in subnet `10.244.0.0/16` must go though the network interface `bridge`. The `bridge` network interface is a BROADCAST, MULTICAST network connection. (*"The bridges act as switches, and send a broadcast frame out every interface except the one where it was received."*)
+E.g., The above output tells that any packet sent to any IP addresses in subnet `10.244.0.0/16` must go though the network interface `bridge`. The `bridge` network interface is a BROADCAST, MULTICAST network connection. (***"The bridges act as switches, and send a broadcast frame out every interface except the one where it was received."***)
 
 ---
 
-#### Some description of the idea IP MASQ (Masquerading):
+#### SNAT, DNAT, IP MASQ (Masquerading), IPTables, Routing Table
 
-***"Masquerading is a special case of Source Network Address Translation (SNAT) and allows you to masquerade an internal network (typically, your LAN Local Area Network with private address space) behind a single, official IP. address on a network interface (typically, your external interface connected to the Internet)."***
+- http://linux-training.be/networking/ch14.html
+- https://access.redhat.com/sites/default/files/attachments/rh_ip_command_cheatsheet_1214_jcs_print.pdf
+- https://kubernetes.io/docs/tutorials/services/source-ip/
+
+- **SNAT**: Source Network Address Translation
+- **DNAT**: Destination Network Address Translation
+- **IP MASQ**: *"Masquerading is a special case of Source Network Address Translation (SNAT) and allows you to masquerade an internal network (typically, your LAN Local Area Network with private address space) behind a single, official IP. address on a network interface (typically, your external interface connected to the Internet)."*
+
+E.g., Say we have two Nodes, Node A and Node B. We create an Ingress service (named `I1`) running on both the Node A and Node B in forms of a NodePort service. Then we have a Service (named `S1`) in the cluster that has two Pods available for it, and both of them are somehow scheduled on Node B.
+
+Then, an external request is routed to Node A from outside of the cluster, reaching to the Ingress service `I1`, based on the configured Ingress rules, the Ingress service `I1` forward the request to Service `S1`. In this process, SNAT and DNAT are both undertaken. DNAT translates the service IP (ClusterIP) into one of the Pod's Id (randomly), and SNAT replace the source IP with Node A's IP. It's basically how forwarding works. Linux has a `conntrack` (Connection Tracker) that tracks connections opened in kernel, so when forwarding traffic like this, it knows how to undo DNAT, SNAT for the reply.
+
+Another scenorio is when a Pod attempts to connect to a external endpoint (outside of the cluster). SNAT/MASQ is used to translate the source address from the Pod's IP to the Node's IP so that the reply can be received.
 
 ---
 
-#### Examples of kube-proxy Managed Routing Rules
+Again, recalll that iptables rules are maintained by `kube-proxy` (by contacting the **Control Plane**, the `kube-proxy` knows when a `Node` is joined to or removed from the cluster). Notice that with Minikube on MacOS, the Kubernetes is actually deployed as a VM ( Container inside a VM :D ), because MacOS doesn't have the Linux thingy needed.
 
-The below examples are some of the IPTable rules maintained by `kube-proxy` (by contacting the **Control Plane**, the `kube-proxy` knows when a `Node` is joined to or removed from the cluster). The output is retrieved from the Node. Notice that with Minikube, the Kubernetes is actually deployed as a Container ( Container inside another Container :D ).
+We use `iptables` command to view the rules specified on each Node machine, notice that there are actually five independent iptables.
 
-Some exmaples of `kube-proxy` maintained Pre-Routing Rules:
+```sh
+# requesting NAT table, -n for not doing DNS lookup, -v for verbose output, -L for listing entries, -t is for the table (we are quering NAT table)
+iptables -t nat -nvL
+```
+
+Some exmaples of `kube-proxy` maintained NAT (Pre-Routing Rules):
 
 ```sh
 iptables -t nat -nvL PREROUTING
 # Chain PREROUTING (policy ACCEPT 9 packets, 540 bytes)
-#  pkts bytes target     prot opt in     out     source               destination
-#    22  1419 KUBE-SERVICES  all  --  *      *       0.0.0.0/0            0.0.0.0/0            /* kubernetes service portals */
-#     3   235 DOCKER_OUTPUT  all  --  *      *       0.0.0.0/0            192.168.65.2
-#    22  1320 DOCKER     all  --  *      *       0.0.0.0/0            0.0.0.0/0            ADDRTYPE match dst-type LOCAL
-#    10   600 CNI-HOSTPORT-DNAT  all  --  *      *       0.0.0.0/0            0.0.0.0/0            ADDRTYPE match dst-type LOCAL
+#  pkts bytes target            prot opt in     out     source               destination
+#    22  1419 KUBE-SERVICES     all  --  *      *       0.0.0.0/0            0.0.0.0/0            /* kubernetes service portals */
+#     3   235 DOCKER_OUTPUT     all  --  *      *       0.0.0.0/0            192.168.65.2
+#    22  1320 DOCKER            all  --  *      *       0.0.0.0/0            0.0.0.0/0            ADDRTYPE match dst-type LOCAL
+#    10   600 CNI-HOSTPORT-DNAT all  --  *      *       0.0.0.0/0            0.0.0.0/0            ADDRTYPE match dst-type LOCAL
 ```
 
 Some exmaples of `kube-proxy` maintained Service Routing Chain:
@@ -2197,18 +2221,18 @@ Some exmaples of `kube-proxy` maintained Service Routing Chain:
 ```sh
 iptables -t nat -nvL KUBE-SERVICES
 # Chain KUBE-SERVICES (2 references)
-#  pkts bytes target     prot opt in     out     source               destination
-#     1    60 KUBE-SVC-XHWOAZAUK25GZQ4W  tcp  --  *      *       0.0.0.0/0            10.100.154.189       /* default/empty-mind cluster IP */ tcp dpt:8081
-#     2   120 KUBE-SVC-NPX46M4PTMTKRN6Y  tcp  --  *      *       0.0.0.0/0            10.96.0.1            /* default/kubernetes:https cluster IP */ tcp dpt:443
-#     0     0 KUBE-SVC-CG5I4G2RS3ZVWGLK  tcp  --  *      *       0.0.0.0/0            10.110.72.144        /* ingress-nginx/ingress-nginx-controller:http cluster IP */ tcp dpt:80
-#     0     0 KUBE-SVC-EDNDUDH2C75GIR6O  tcp  --  *      *       0.0.0.0/0            10.110.72.144        /* ingress-nginx/ingress-nginx-controller:https cluster IP */ tcp dpt:443
-#     0     0 KUBE-SVC-EZYNCFY2F7N6OQA2  tcp  --  *      *       0.0.0.0/0            10.109.90.144        /* ingress-nginx/ingress-nginx-controller-admission:https-webhook cluster IP */ tcp dpt:443
-#     0     0 KUBE-SVC-ERIFXISQEP7F7OF4  tcp  --  *      *       0.0.0.0/0            10.96.0.10           /* kube-system/kube-dns:dns-tcp cluster IP */ tcp dpt:53
-#     0     0 KUBE-SVC-JD5MR3NA4I4DYORP  tcp  --  *      *       0.0.0.0/0            10.96.0.10           /* kube-system/kube-dns:metrics cluster IP */ tcp dpt:9153
-#     2   164 KUBE-SVC-TCOU7JCQXEZGVUNU  udp  --  *      *       0.0.0.0/0            10.96.0.10           /* kube-system/kube-dns:dns cluster IP */ udp dpt:53
-#     0     0 KUBE-SVC-Z6GDYMWE5TV2NNJN  tcp  --  *      *       0.0.0.0/0            10.105.19.84         /* kubernetes-dashboard/dashboard-metrics-scraper cluster IP */ tcp dpt:8000
-#     0     0 KUBE-SVC-CEZPIJSAUFW5MYPQ  tcp  --  *      *       0.0.0.0/0            10.96.89.154         /* kubernetes-dashboard/kubernetes-dashboard cluster IP */ tcp dpt:80
-#  2615  157K KUBE-NODEPORTS  all  --  *      *       0.0.0.0/0            0.0.0.0/0            /* kubernetes service nodeports; NOTE: this must be the last rule in this chain */ ADDRTYPE match dst-type LOCAL
+#  pkts bytes target                     prot opt in     out     source      destination
+#     1    60 KUBE-SVC-XHWOAZAUK25GZQ4W  tcp  --  *      *       0.0.0.0/0   10.100.154.189  /* default/empty-mind cluster IP */ tcp dpt:8081
+#     2   120 KUBE-SVC-NPX46M4PTMTKRN6Y  tcp  --  *      *       0.0.0.0/0   10.96.0.1       /* default/kubernetes:https cluster IP */ tcp dpt:443
+#     0     0 KUBE-SVC-CG5I4G2RS3ZVWGLK  tcp  --  *      *       0.0.0.0/0   10.110.72.144   /* ingress-nginx/ingress-nginx-controller:http cluster IP */ tcp dpt:80
+#     0     0 KUBE-SVC-EDNDUDH2C75GIR6O  tcp  --  *      *       0.0.0.0/0   10.110.72.144   /* ingress-nginx/ingress-nginx-controller:https cluster IP */ tcp dpt:443
+#     0     0 KUBE-SVC-EZYNCFY2F7N6OQA2  tcp  --  *      *       0.0.0.0/0   10.109.90.144   /* ingress-nginx/ingress-nginx-controller-admission:https-webhook cluster IP */ tcp dpt:443
+#     0     0 KUBE-SVC-ERIFXISQEP7F7OF4  tcp  --  *      *       0.0.0.0/0   10.96.0.10      /* kube-system/kube-dns:dns-tcp cluster IP */ tcp dpt:53
+#     0     0 KUBE-SVC-JD5MR3NA4I4DYORP  tcp  --  *      *       0.0.0.0/0   10.96.0.10      /* kube-system/kube-dns:metrics cluster IP */ tcp dpt:9153
+#     2   164 KUBE-SVC-TCOU7JCQXEZGVUNU  udp  --  *      *       0.0.0.0/0   10.96.0.10      /* kube-system/kube-dns:dns cluster IP */ udp dpt:53
+#     0     0 KUBE-SVC-Z6GDYMWE5TV2NNJN  tcp  --  *      *       0.0.0.0/0   10.105.19.84    /* kubernetes-dashboard/dashboard-metrics-scraper cluster IP */ tcp dpt:8000
+#     0     0 KUBE-SVC-CEZPIJSAUFW5MYPQ  tcp  --  *      *       0.0.0.0/0   10.96.89.154    /* kubernetes-dashboard/kubernetes-dashboard cluster IP */ tcp dpt:80
+#  2615  157K KUBE-NODEPORTS             all  --  *      *       0.0.0.0/0   0.0.0.0/0       /* kubernetes service nodeports; NOTE: this must be the last rule in this chain */ ADDRTYPE match dst-type LOCAL
 ```
 
 Kubernetes Services ClusterIPs:
@@ -2220,27 +2244,199 @@ kubectl get svc -o wide
 # kubernetes   ClusterIP   10.96.0.1        <none>        443/TCP    11d    <none>
 ```
 
-The route matches chain `KUBE-SVC-XHWOAZAUK25GZQ4W` based on the Cluster IP (`10.100.154.189`).
+The chain `KUBE-SVC-XHWOAZAUK25GZQ4W` for the Cluster IP `10.100.154.189`, the destination is matched, so it jumps to this chain, eventually, the destination will be NATed to a Pod IP.
 
 ```sh
 iptables -t nat -nvL KUBE-SVC-XHWOAZAUK25GZQ4W
 # Chain KUBE-SVC-XHWOAZAUK25GZQ4W (1 references)
-#  pkts bytes target     prot opt in     out     source               destination
-#     0     0 KUBE-MARK-MASQ  tcp  --  *      *      !10.244.0.0/16        10.100.154.189       /* default/empty-mind cluster IP */ tcp dpt:8081
-#     1    60 KUBE-SEP-AFYS27EZD27BHQIB  all  --  *      *       0.0.0.0/0            0.0.0.0/0            /* default/empty-mind -> 10.244.0.96:8081 */
+#  pkts bytes target                     prot opt in  out  source          destination
+#     0     0 KUBE-MARK-MASQ             tcp  --  *   *    !10.244.0.0/16  10.100.154.189   /* default/empty-mind cluster IP */ tcp dpt:8081
+#     1    60 KUBE-SEP-AFYS27EZD27BHQIB  all  --  *   *    0.0.0.0/0       0.0.0.0/0        /* default/empty-mind -> 10.244.0.96:8081 */
 ```
 
-Continue following the chain:
+To list routes available:
 
 ```sh
-iptables -t nat -nvL KUBE-SEP-AFYS27EZD27BHQIB
-# Chain KUBE-SEP-AFYS27EZD27BHQIB (1 references)
-#  pkts bytes target     prot opt in     out     source               destination
-#     0     0 KUBE-MARK-MASQ  all  --  *      *       10.244.0.96          0.0.0.0/0            /* default/empty-mind */
-#     1    60 DNAT       tcp  --  *      *       0.0.0.0/0            0.0.0.0/0            /* default/empty-mind */ tcp to:10.244.0.96:8081
+ip route
 ```
 
-Finally the packet is routed to `10.244.0.96`, which is understood and handled by the CNI plugin.
+To check route for a given destination IP (this can be used to prove that the traffic to a Pod on another Node is being routed to the virtual network interface setup by CNI plugin):
+
+```sh
+kubectl -n default get pods -o wide
+# NAME                          READY   STATUS    RESTARTS   AGE     IP            NODE      NOMINATED NODE   READINESS GATES
+# empty-mind-76846d9f99-5z4jw   1/1     Running   0          44h     10.244.2.42   worker2   <none>           <none>
+# mega-head-59f8dd9fdb-qclw5    1/1     Running   0          7d18h   10.244.2.27   worker2   <none>           <none>
+# mega-head-59f8dd9fdb-rz7vp    1/1     Running   0          6d22h   10.244.2.38   worker2   <none>           <none>
+
+ip route get 10.244.2.42
+# 10.244.2.42 via 10.244.2.0 dev flannel.1 src 10.244.1.0
+#     cache
+```
+
+To list network interface and IP assigned on these interfaces:
+
+```sh
+ip addr
+# 1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+#     link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+#     inet 127.0.0.1/8 scope host lo
+#        valid_lft forever preferred_lft forever
+#     inet6 ::1/128 scope host
+#        valid_lft forever preferred_lft forever
+# 4: flannel.1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UNKNOWN group default
+#     link/ether be:8f:0d:c8:06:6b brd ff:ff:ff:ff:ff:ff
+#     inet 10.244.1.0/32 scope global flannel.1
+#        valid_lft forever preferred_lft forever
+#     inet6 fe80::bc8f:dff:fec8:66b/64 scope link
+#        valid_lft forever preferred_lft forever
+# 5: cni0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP group default qlen 1000
+#     link/ether 92:7a:8e:37:84:2c brd ff:ff:ff:ff:ff:ff
+#     inet 10.244.1.1/24 brd 10.244.1.255 scope global cni0
+#        valid_lft forever preferred_lft forever
+#     inet6 fe80::907a:8eff:fe37:842c/64 scope link
+#        valid_lft forever preferred_lft forever
+# 20: vethef5b778e@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue master cni0 state UP group default
+#     link/ether ba:f4:54:8c:50:6f brd ff:ff:ff:ff:ff:ff link-netnsid 0
+#     inet6 fe80::b8f4:54ff:fe8c:506f/64 scope link
+#        valid_lft forever preferred_lft forever
+# 21: veth9d896d6c@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue master cni0 state UP group default
+#     link/ether 2a:13:1c:27:65:4b brd ff:ff:ff:ff:ff:ff link-netnsid 1
+#     inet6 fe80::2813:1cff:fe27:654b/64 scope link
+#        valid_lft forever preferred_lft forever
+# ....
+```
+
+Using `ethtool` to check the type of driver the network interface is using:
+
+```sh
+ethtool -i cni0
+# driver: bridge
+# version: 2.3
+# firmware-version: N/A
+# expansion-rom-version:
+# bus-info: N/A
+# supports-statistics: no
+# supports-test: no
+# supports-eeprom-access: no
+# supports-register-dump: no
+# supports-priv-flags: no
+
+ethtool -i flannel.1
+# driver: vxlan
+# version: 0.1
+# firmware-version:
+# expansion-rom-version:
+# bus-info:
+# supports-statistics: no
+# supports-test: no
+# supports-eeprom-access: no
+# supports-register-dump: no
+# supports-priv-flags: no
+
+ethtool -i vethef5b778e
+# driver: veth
+# version: 1.0
+# firmware-version:
+# expansion-rom-version:
+# bus-info:
+# supports-statistics: yes
+# supports-test: no
+# supports-eeprom-access: no
+# supports-register-dump: no
+# supports-priv-flags: no
+```
+
+To dump all iptables rules to stdout:
+
+```sh
+# kinda the same as `iptables -S` for all the tables
+iptables-save
+```
+
+To list all the links:
+
+```sh
+ip link
+# 1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN mode DEFAULT group default qlen 1000
+#     link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+# 4: flannel.1: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UNKNOWN mode DEFAULT group default
+#     link/ether be:8f:0d:c8:06:6b brd ff:ff:ff:ff:ff:ff
+# 5: cni0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+#     link/ether 92:7a:8e:37:84:2c brd ff:ff:ff:ff:ff:ff
+# 20: vethef5b778e@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue master cni0 state UP mode DEFAULT group default
+#     link/ether ba:f4:54:8c:50:6f brd ff:ff:ff:ff:ff:ff link-netnsid 0
+# 21: veth9d896d6c@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue master cni0 state UP mode DEFAULT group default
+#     link/ether 2a:13:1c:27:65:4b brd ff:ff:ff:ff:ff:ff link-netnsid 1
+# ...
+```
+
+#### The Five Iptables in Linux Kernel
+
+***Iptables and Routing Table is different thing, i.e., `iptables` and `ip route` are different.***
+
+- https://ro-che.info/articles/2021-02-27-linux-routing#:~:text=Routing%20tables%20(%20ip%20route%20)&text=(By%20the%20way%2C%20do%20not,are%20completely%20different%20and%20unrelated.)
+- http://linux-training.be/networking/ch14.html
+- https://www.frozentux.net/iptables-tutorial/chunkyhtml/
+- https://unix.stackexchange.com/questions/191607/iptables-and-return-target
+
+According to `man` of `iptables` (the most important ones are `filter`, `nat`, `mangle`):
+
+- **filter**
+  - This is the default table (if no -t option is passed). It contains the built-in chains INPUT (for packets destined to local sockets),
+    FORWARD (for packets being routed through the box), and OUTPUT (for locally-generated packets).
+  - "...used for filtering packets."
+  - Targets:
+    - DROP
+    - ACCEPT
+
+- **nat**
+  - This table is consulted when a packet that creates a new connection is encountered. It consists of three built-ins: PREROUTING (for
+    altering packets as soon as they come in), OUTPUT (for altering locally-generated packets before routing), and POSTROUTING (for altering
+    packets as they are about to go out). IPv6 NAT support is available since kernel 3.7.
+  - "...only be used to translate the packet's source field or destination field."
+  - "...only the first packet in a stream will hit this table."
+  - Targets:
+    - DNAT
+    - SNAT
+    - MASQUERADE
+    - REDIRECT
+  - Built-in chains:
+    - `PREROUTING`: for DNAT
+    - `POSTROUTING`: for SNAT
+    - `OUTPUT`
+
+- **mangle**
+  - This table is used for specialized packet alteration. Until kernel 2.4.17 it had two built-in chains: PREROUTING (for altering incoming
+    packets before routing) and OUTPUT (for altering locally-generated packets before routing). Since kernel 2.4.18, three other built-in
+    chains are also supported: INPUT (for packets coming into the box itself), FORWARD (for altering packets being routed through the box),
+    and POSTROUTING (for altering packets as they are about to go out).
+  - *"You are strongly advised not to use this table for any filtering; nor will any DNAT, SNAT or Masquerading work in this table."*
+  - Targets:
+    - `TOS`: *"... used to set and/or change the Type of Service field in the packet"*
+    - `TTL`: *"... used to change the TTL (Time To Live) field of the packet"*
+    - `MARK`: *"... used to set special mark values to the packet"*
+  - Built-in chains:
+    - `PREROUTING`: *"...used for altering packets just as they enter the firewall and before they hit the routing decision"*
+    - `POSTROUTING`: *"...used to mangle packets just after all routing decisions have been made."*
+    - `OUTPUT`: *"...used for altering locally generated packets after they enter the routing decision"*
+    - `INPUT`: *"...used to alter packets after they have been routed to the local computer itself, but before the user space application actually sees the data"*
+    - `FORWARD`: *"...used to mangle packets after they have hit the first routing decision, but before they actually hit the last routing decision"*
+
+- **raw**
+  - This table is used mainly for configuring exemptions from connection tracking in combination with the NOTRACK target. It registers at
+    the netfilter hooks with higher priority and is thus called before ip_conntrack, or any other IP tables. It provides the following
+    built-in chains: PREROUTING (for packets arriving via any network interface) OUTPUT (for packets generated by local processes)
+
+- **security**
+  - This table is used for Mandatory Access Control (MAC) networking rules, such as those enabled by the SECMARK and CONNSECMARK targets.
+    Mandatory Access Control is implemented by Linux Security Modules such as SELinux. The security table is called after the filter table,
+    allowing any Discretionary Access Control (DAC) rules in the filter table to take effect before MAC rules. This table provides the fol‐
+    lowing built-in chains: INPUT (for packets coming into the box itself), OUTPUT (for altering locally-generated packets before routing),
+    and FORWARD (for altering packets being routed through the box).
+
+
+***"ACCEPT means to let the packet through. DROP means to drop the packet on the floor. RETURN means stop traversing this chain and resume at the next rule in the previous (calling) chain. If the end of a built-in chain is reached or a rule in a built-in chain with target RETURN is matched, the target specified by the chain policy determines the fate of the packet.".***
 
 ### EndpointSlices (& Endpoints)
 
