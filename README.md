@@ -526,7 +526,8 @@ kubectl get service
 # NAME         TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)          AGE
 # empty-head   NodePort    10.100.248.90   <none>        8080:32685/TCP   5s
 # kubernetes   ClusterIP   10.96.0.1       <none>        443/TCP          8h
-# photon@Yongjie ~$ mk service empty-head
+
+minikube service empty-head
 # |-----------|------------|-------------|---------------------------|
 # | NAMESPACE |    NAME    | TARGET PORT |            URL            |
 # |-----------|------------|-------------|---------------------------|
@@ -593,7 +594,7 @@ spec:
         - containerPort: 80
 ```
 
-Then we use kubectl to create the kubenetes object:
+Then we use kubectl to create the kubernetes object:
 
 ```sh
 # we can also use 'kubectl create -f deployment.yaml' (they are different kind of cmds tho)
@@ -2369,6 +2370,18 @@ ip link
 # 21: veth9d896d6c@if2: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue master cni0 state UP mode DEFAULT group default
 #     link/ether 2a:13:1c:27:65:4b brd ff:ff:ff:ff:ff:ff link-netnsid 1
 # ...
+```
+
+To see the connection being tracked (e.g., for destination 10.244.2.42 or replied from 10.244.2.42):
+
+```sh
+conntrack -L --dst 10.244.2.42 --reply-src 10.244.2.42
+```
+
+To list neighbours in ARP tables:
+
+```sh
+ip neigh
 ```
 
 #### The Five Iptables in Linux Kernel
