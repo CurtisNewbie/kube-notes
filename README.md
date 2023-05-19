@@ -24,7 +24,7 @@ Notes for kubernetes
 
 ## Getting Started
 
-### 1. Install Minikube
+### Install Minikube
 
 - Minikube Getting Started https://minikube.sigs.k8s.io/docs/start/
 
@@ -67,7 +67,7 @@ curl https://raw.githubusercontent.com/Homebrew/homebrew-cask/1a83f3469ab57b01c0
 brew install --cask docker.rb
 ```
 
-### 2. Run Minikube
+### Run Minikube
 
 Start Minikube
 
@@ -89,7 +89,7 @@ http://127.0.0.1:55901/api/v1/namespaces/kubernetes-dashboard/services/http:kube
 
 This command also serves as a proxy for us to access, by default the kubernetes network is not accessible externally. We can kill it by ctrl-c.
 
-### 3. The Basic
+### The Basic
 
 In k8s, Pod is a group of one or more containers. K8s deployment monitors and controls the pod, and restart the containers in pod if necessary. The concept is very similar to the docker-compose and the docker world, but with a larger scale. Deployment is also reponsible for scaling pods.
 
